@@ -1,0 +1,1617 @@
+# 📚 سیستم کامل استخراج اطلاعات کتاب با قدرت API و رابط گریدو
+# 🚀 نسخه پیشرفته - تمام ویژگی‌های فعال
+
+# ============================================================================
+# 📦 نصب و راه‌اندازی کتابخانه‌ها
+# ============================================================================
+
+print("📦 در حال نصب و راه‌اندازی کتابخانه‌ها...")
+
+!pip install transformers torch torchvision torchaudio -q
+!pip install pillow pytesseract pdf2image -q
+!pip install easyocr sentence-transformers scikit-learn -q
+!pip install persian-tools arabic-reshaper python-bidi -q
+!pip install spacy rapidfuzz -q
+!pip install llama-index-core llama-index-llms-openrouter llama-index-readers-file -q
+!pip install llama-index-embeddings-huggingface python-dotenv -q
+!pip install gradio -q
+!python -m spacy download en_core_web_sm -q
+!apt-get install -y tesseract-ocr-fas poppler-utils -qq
+
+print("✅ کتابخانه‌ها نصب شدند")
+
+# ============================================================================
+# 🔧 Import کتابخانه‌ها
+# ============================================================================
+
+import pytesseract
+from pdf2image import convert_from_path
+from PIL import Image, ImageEnhance, ImageFilter
+import re
+import json
+from typing import Dict, Any, List, Tuple, Optional
+from google.colab import files
+import os
+from datetime import datetime
+import easyocr
+import numpy as np
+from transformers import pipeline, AutoTokenizer, AutoModel, AutoModelForTokenClassification
+from sentence_transformers import SentenceTransformer, util
+import torch
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.neighbors import NearestNeighbors
+from sklearn.ensemble import RandomForestClassifier
+import arabic_reshaper
+from bidi.algorithm import get_display
+import cv2
+from collections import Counter
+import spacy
+from rapidfuzz import fuzz, process
+from getpass import getpass
+from dotenv import load_dotenv
+import gradio as gr
+import tempfile
+import requests
+from pathlib import Path
+
+# تنظیمات محیطی
+load_dotenv()
+
+# تنظیم مسیر Tesseract برای Colab
+pytesseract.pytesseract.tesseract_cmd = '/usr/bin/tesseract'
+
+print("🔧 تنظیمات اولیه انجام شد")
+
+# ============================================================================
+# 🧠 بخش ۱: مدل‌های هوش مصنوعی با دقت بالا
+# ============================================================================
+
+class HighAccuracyAIModels:
+    """مدل‌های هوش مصنوعی با دقت فوق العاده"""
+
+    def __init__(self):
+        self.setup_high_accuracy_models()
+
+    def setup_high_accuracy_models(self):
+        """بارگذاری مدل‌های با دقت بالا"""
+        print("🧠 در حال بارگذاری مدل‌های با دقت بالا...")
+
+        try:
+            # مدل NER با دقت بالا
+            self.ner_model_name = "HooshvareLab/bert-fa-zwnj-base-ner"
+            tokenizer = AutoTokenizer.from_pretrained(self.ner_model_name)
+            model = AutoModelForTokenClassification.from_pretrained(self.ner_model_name)
+            self.ner_pipeline = pipeline(
+                "token-classification",
+                model=model,
+                tokenizer=tokenizer,
+                aggregation_strategy="max",
+                device=0 if torch.cuda.is_available() else -1
+            )
+            print("✅ مدل NER با دقت بالا بارگذاری شد")
+        except Exception as e:
+            print(f"⚠️ خطا در بارگذاری مدل NER: {e}")
+            self.ner_pipeline = None
+
+        try:
+            # مدل زبانی بزرگ‌تر برای درک بهتر
+            self.text_model = pipeline(
+                "text-classification",
+                model="HooshvareLab/bert-fa-base-uncased",
+                device=0 if torch.cuda.is_available() else -1
+            )
+            print("✅ مدل زبانی پیشرفته بارگذاری شد")
+        except Exception as e:
+            print(f"⚠️ خطا در بارگذاری مدل زبانی: {e}")
+            self.text_model = None
+
+        try:
+            # مدل embedding با دقت بالا
+            self.embedding_model = SentenceTransformer(
+                'sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2',
+                device='cuda' if torch.cuda.is_available() else 'cpu'
+            )
+            print("✅ مدل embedding با دقت بالا بارگذاری شد")
+        except Exception as e:
+            print(f"⚠️ خطا در بارگذاری مدل embedding: {e}")
+            self.embedding_model = None
+
+        # OCR هوشمند با تنظیمات پیشرفته
+        try:
+            self.easy_ocr_reader = easyocr.Reader(
+                ['fa', 'en'],
+                gpu=torch.cuda.is_available()
+            )
+            print("✅ OCR هوشمند پیشرفته بارگذاری شد")
+        except Exception as e:
+            print(f"⚠️ خطا در بارگذاری OCR: {e}")
+            self.easy_ocr_reader = None
+
+        # مدل SpaCy برای پردازش متن
+        try:
+            self.nlp = spacy.load("en_core_web_sm")
+            print("✅ مدل SpaCy بارگذاری شد")
+        except:
+            print("⚠️ مدل SpaCy بارگذاری نشد")
+            self.nlp = None
+
+        # داده‌های آموزشی پیشرفته
+        self.setup_advanced_training_data()
+
+    def setup_advanced_training_data(self):
+        """داده‌های آموزشی پیشرفته برای بهبود دقت"""
+        self.advanced_patterns = {
+            'title_phrases': [
+                'عنوان کتاب', 'نام کتاب', 'عنوان اصلی', 'Title', 'Book Title',
+                'عنوان اثر', 'نام اثر', 'Title of the Book'
+            ],
+            'author_phrases': [
+                'نویسنده', 'مؤلف', 'تألیف', 'نگارش', 'Author', 'Writer',
+                'نویسندگان', 'مؤلفین', 'By', 'Written by'
+            ],
+            'publisher_phrases': [
+                'ناشر', 'انتشارات', 'چاپ', 'Publisher', 'Publication',
+                'انتشار یافته توسط', 'منتشر شده توسط'
+            ],
+            'year_phrases': [
+                'سال چاپ', 'تاریخ چاپ', 'چاپ سال', 'Year', 'Publication Year',
+                'تاریخ انتشار', 'سال انتشار', 'زمستان', 'بهار', 'تابستان', 'پاییز'
+            ],
+            'edition_phrases': [
+                'نوبت چاپ', 'چاپ', 'Edition', 'Print', 'Version',
+                'ویرایش', 'نسخه'
+            ],
+            'isbn_phrases': [
+                'شابک', 'ISBN', 'International Standard Book Number',
+                'کد کتاب', 'شناسه کتاب'
+            ],
+            'translator_phrases': [
+                'مترجم', 'ترجمه', 'Translator', 'Translated by',
+                'ترجمه شده توسط', 'برگردان'
+            ]
+        }
+
+# ============================================================================
+# 🔍 بخش ۲: OCR با دقت فوق العاده - تغییر: پردازش 8 صفحه اول
+# ============================================================================
+
+class UltraAccuracyOCREngine:
+    """موتور OCR با دقت فوق العاده"""
+
+    def __init__(self, ai_models):
+        self.ai_models = ai_models
+        self.setup_advanced_ocr()
+
+    def setup_advanced_ocr(self):
+        """تنظیمات پیشرفته OCR"""
+        # تنظیمات Tesseract برای دقت بالا
+        self.tesseract_configs = [
+            r'--oem 3 --psm 6 -c tessedit_char_whitelist=آابپتثجچحخدذرزژسشصضطظعغفقکگلمنوهیءةيك۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩ :.,-()',
+            r'--oem 3 --psm 4 -c preserve_interword_spaces=1',
+            r'--oem 3 --psm 8'
+        ]
+
+    def extract_text_ultra_accurate(self, input_file) -> Tuple[str, Dict[str, Any]]:
+        """استخراج متن با دقت فوق العاده - تغییر: پردازش 8 صفحه اول"""
+        print("🔍 استخراج متن با دقت فوق العاده...")
+
+        results = {
+            'methods': {},
+            'confidence_scores': {},
+            'processing_times': {},
+            'quality_metrics': {}
+        }
+
+        try:
+            # روش ۱: Tesseract با پیش‌پردازش پیشرفته
+            tesseract_results = self._advanced_tesseract_extraction(input_file)
+            results['methods']['tesseract_advanced'] = tesseract_results
+
+            # روش ۲: EasyOCR با تنظیمات دقیق
+            easyocr_results = self._safe_easyocr_extraction(input_file)
+            results['methods']['easyocr_precision'] = easyocr_results
+
+            # ترکیب هوشمند نتایج
+            if easyocr_results['text']:
+                combined_text, fusion_metrics = self._intelligent_fusion(
+                    tesseract_results['text'],
+                    easyocr_results['text']
+                )
+            else:
+                combined_text = tesseract_results['text']
+                fusion_metrics = {'method': 'tesseract_only'}
+
+            results['combined_text'] = combined_text
+            results['fusion_metrics'] = fusion_metrics
+            results['quality_metrics'] = self._calculate_comprehensive_quality(combined_text)
+
+            print(f"✅ استخراج کامل - طول متن: {len(combined_text)} کاراکتر")
+            return combined_text, results
+
+        except Exception as e:
+            print(f"❌ خطا در استخراج متن: {e}")
+            # بازگشت به روش ساده در صورت خطا
+            try:
+                simple_text = self._simple_extraction(input_file)
+                return simple_text, results
+            except:
+                return "", results
+
+    def _advanced_tesseract_extraction(self, input_file) -> Dict[str, Any]:
+        """استخراج پیشرفته با Tesseract - تغییر: پردازش 8 صفحه اول"""
+        start_time = datetime.now()
+
+        try:
+            if isinstance(input_file, str) and input_file.lower().endswith('.pdf'):
+                # تغییر: پردازش 8 صفحه اول به جای 10 صفحه
+                images = convert_from_path(input_file, first_page=1, last_page=8, dpi=300)
+                all_texts = []
+
+                for i, image in enumerate(images):
+                    print(f"📄 پردازش صفحه {i+1} با Tesseract...")
+
+                    # پیش‌پردازش تصویر
+                    processed_image = self._preprocess_image(image)
+
+                    # اجرای چندین تنظیمات مختلف
+                    page_texts = []
+                    for config in self.tesseract_configs:
+                        try:
+                            text = pytesseract.image_to_string(
+                                processed_image,
+                                lang='fas+eng',
+                                config=config
+                            )
+                            if text.strip():
+                                page_texts.append(text)
+                        except Exception as e:
+                            continue
+
+                    # انتخاب بهترین متن برای هر صفحه
+                    if page_texts:
+                        best_page_text = max(page_texts, key=lambda x: len(x))
+                        all_texts.append(f"--- صفحه {i+1} ---\n{best_page_text}")
+
+                final_text = '\n'.join(all_texts)
+
+            else:
+                # پردازش فایل تصویری
+                if isinstance(input_file, str):
+                    image = Image.open(input_file)
+                else:
+                    image = input_file
+
+                processed_image = self._preprocess_image(image)
+                final_text = pytesseract.image_to_string(processed_image, lang='fas+eng')
+
+            processing_time = (datetime.now() - start_time).total_seconds()
+
+            return {
+                'text': final_text,
+                'confidence': 0.8,
+                'processing_time': processing_time,
+                'method': 'tesseract_advanced'
+            }
+
+        except Exception as e:
+            print(f"⚠️ خطا در Tesseract: {e}")
+            return {'text': '', 'confidence': 0, 'processing_time': 0, 'method': 'error'}
+
+    def _safe_easyocr_extraction(self, input_file) -> Dict[str, Any]:
+        """استخراج ایمن با EasyOCR - تغییر: پردازش 8 صفحه اول"""
+        start_time = datetime.now()
+
+        if not self.ai_models.easy_ocr_reader:
+            return {'text': '', 'confidence': 0, 'processing_time': 0, 'method': 'not_available'}
+
+        try:
+            if isinstance(input_file, str) and input_file.lower().endswith('.pdf'):
+                # تغییر: پردازش 8 صفحه اول به جای 5 صفحه
+                images = convert_from_path(input_file, first_page=1, last_page=8, dpi=300)
+                all_texts = []
+                confidences = []
+
+                for i, image in enumerate(images):
+                    print(f"📄 پردازش صفحه {i+1} با EasyOCR...")
+
+                    image_np = np.array(image)
+
+                    # تشخیص با پارامترهای دقیق
+                    results = self.ai_models.easy_ocr_reader.readtext(
+                        image_np,
+                        paragraph=True,
+                        min_size=10,
+                        text_threshold=0.4,
+                        low_text=0.3
+                    )
+
+                    page_text = ""
+                    for result in results:
+                        if len(result) >= 3:
+                            text = result[1]
+                            confidence = result[2]
+                        elif len(result) == 2:
+                            text = result[1]
+                            confidence = 0.7
+                        else:
+                            continue
+
+                        if confidence > 0.4:
+                            page_text += text + " "
+                            confidences.append(confidence)
+
+                    if page_text.strip():
+                        all_texts.append(f"--- صفحه {i+1} ---\n{page_text.strip()}")
+
+                final_text = '\n'.join(all_texts)
+                avg_confidence = np.mean(confidences) if confidences else 0
+
+            else:
+                if isinstance(input_file, str):
+                    image = Image.open(input_file)
+                    image_np = np.array(image)
+                else:
+                    image_np = np.array(input_file)
+
+                results = self.ai_models.easy_ocr_reader.readtext(
+                    image_np,
+                    paragraph=True,
+                    text_threshold=0.5
+                )
+
+                extracted_texts = []
+                confidences = []
+                for result in results:
+                    if len(result) >= 3:
+                        text = result[1]
+                        confidence = result[2]
+                    elif len(result) == 2:
+                        text = result[1]
+                        confidence = 0.7
+                    else:
+                        continue
+
+                    if confidence > 0.4:
+                        extracted_texts.append(text)
+                        confidences.append(confidence)
+
+                final_text = " ".join(extracted_texts)
+                avg_confidence = np.mean(confidences) if confidences else 0
+
+            processing_time = (datetime.now() - start_time).total_seconds()
+
+            return {
+                'text': final_text,
+                'confidence': avg_confidence,
+                'processing_time': processing_time,
+                'method': 'easyocr_safe'
+            }
+
+        except Exception as e:
+            print(f"⚠️ خطا در EasyOCR: {e}")
+            return {'text': '', 'confidence': 0, 'processing_time': 0, 'method': 'error'}
+
+    def _simple_extraction(self, input_file) -> str:
+        """استخراج ساده برای مواقع اضطراری - تغییر: پردازش 8 صفحه اول"""
+        try:
+            if isinstance(input_file, str) and input_file.lower().endswith('.pdf'):
+                # تغییر: پردازش 8 صفحه اول به جای 3 صفحه
+                images = convert_from_path(input_file, first_page=1, last_page=8, dpi=200)
+                texts = []
+                for image in images:
+                    text = pytesseract.image_to_string(image, lang='fas')
+                    if text.strip():
+                        texts.append(text)
+                return '\n'.join(texts)
+            else:
+                if isinstance(input_file, str):
+                    image = Image.open(input_file)
+                else:
+                    image = input_file
+                return pytesseract.image_to_string(image, lang='fas')
+        except:
+            return ""
+
+    def _preprocess_image(self, image):
+        """پیش‌پردازش ساده تصویر"""
+        try:
+            if image.mode != 'L':
+                image = image.convert('L')
+            enhancer = ImageEnhance.Contrast(image)
+            image = enhancer.enhance(1.3)
+            return image
+        except:
+            return image
+
+    def _intelligent_fusion(self, text1: str, text2: str) -> Tuple[str, Dict[str, float]]:
+        """ترکیب هوشمند متون"""
+        if not text1 and not text2:
+            return "", {'method': 'empty'}
+
+        if not text1:
+            return text2, {'method': 'easyocr_only'}
+
+        if not text2:
+            return text1, {'method': 'tesseract_only'}
+
+        lines1 = text1.split('\n')
+        lines2 = text2.split('\n')
+        fused_lines = []
+
+        max_lines = max(len(lines1), len(lines2))
+        for i in range(max_lines):
+            line1 = lines1[i] if i < len(lines1) else ""
+            line2 = lines2[i] if i < len(lines2) else ""
+
+            line1_clean = line1.strip()
+            line2_clean = line2.strip()
+
+            if not line1_clean and not line2_clean:
+                continue
+
+            if self._calculate_line_quality(line1_clean) >= self._calculate_line_quality(line2_clean):
+                fused_lines.append(line1_clean)
+            else:
+                fused_lines.append(line2_clean)
+
+        fused_text = '\n'.join(fused_lines)
+
+        return fused_text, {
+            'method': 'fusion',
+            'lines_combined': len(fused_lines),
+            'quality_score': self._calculate_text_quality(fused_text)
+        }
+
+    def _calculate_line_quality(self, line: str) -> float:
+        """محاسبه کیفیت خط"""
+        if not line.strip():
+            return 0.0
+
+        score = 0.0
+        if 5 <= len(line) <= 200:
+            score += 0.3
+
+        persian_chars = len(re.findall(r'[آ-ی]', line))
+        if persian_chars >= 2:
+            score += 0.4
+
+        words = line.split()
+        if 1 <= len(words) <= 20:
+            score += 0.3
+
+        return min(score, 1.0)
+
+    def _calculate_text_quality(self, text: str) -> float:
+        """محاسبه کیفیت کلی متن"""
+        lines = [line.strip() for line in text.split('\n') if line.strip()]
+        if not lines:
+            return 0.0
+
+        line_qualities = [self._calculate_line_quality(line) for line in lines]
+        return np.mean(line_qualities) if line_qualities else 0.0
+
+    def _calculate_comprehensive_quality(self, text: str) -> Dict[str, float]:
+        """محاسبه کیفیت جامع متن"""
+        quality_score = self._calculate_text_quality(text)
+        lines = [line.strip() for line in text.split('\n') if line.strip()]
+        persian_chars = len(re.findall(r'[آ-ی]', text))
+        total_chars = len(text)
+
+        return {
+            'overall_score': quality_score,
+            'line_count': len(lines),
+            'persian_ratio': persian_chars / total_chars if total_chars > 0 else 0,
+            'total_chars': total_chars
+        }
+
+# ============================================================================
+# 🤖 بخش ۳: سیستم RAG پیشرفته - تغییر: حذف پرسش و پاسخ
+# ============================================================================
+
+class AdvancedRAGSystem:
+    """سیستم RAG پیشرفته برای استخراج و تحلیل متادیتا"""
+
+    def __init__(self):
+        self.setup_api_key()
+        self.setup_llm()
+        self.knowledge_base = None
+
+    def setup_api_key(self):
+        """دریافت API Key از کاربر"""
+        if 'OPENROUTER_API_KEY' not in os.environ:
+            print("🔑 لطفاً API Key OpenRouter خود را وارد کنید:")
+            print("   (می‌توانید از https://openrouter.ai دریافت کنید)")
+            api_key = getpass("API Key: ")
+            os.environ['OPENROUTER_API_KEY'] = api_key
+            self.api_key = api_key
+            print("✅ API Key ذخیره شد")
+        else:
+            self.api_key = os.environ['OPENROUTER_API_KEY']
+
+    def setup_llm(self):
+        """تنظیم مدل زبانی"""
+        try:
+            from llama_index.llms.openrouter import OpenRouter
+            from llama_index.embeddings.huggingface import HuggingFaceEmbedding
+            from llama_index.core import VectorStoreIndex
+            from llama_index.core.node_parser import SentenceSplitter
+
+            self.llm = OpenRouter(
+                model="meta-llama/llama-3-70b-instruct",
+                temperature=0.1,
+                max_tokens=2000,
+                context_window=8000,
+                api_key=self.api_key
+            )
+
+            self.embed_model = HuggingFaceEmbedding(
+                model_name="sentence-transformers/paraphrase-multilingual-mpnet-base-v2"
+            )
+
+            print("✅ مدل زبانی RAG تنظیم شد")
+
+        except Exception as e:
+            print(f"❌ خطا در تنظیم مدل RAG: {e}")
+            self.llm = None
+
+    def create_knowledge_base(self, text: str):
+        """ایجاد پایگاه دانش از متن کتاب"""
+        if not self.llm:
+            print("❌ مدل زبانی در دسترس نیست")
+            return False
+
+        try:
+            from llama_index.core import Document
+            from llama_index.core import VectorStoreIndex
+            from llama_index.core.node_parser import SentenceSplitter
+
+            document = Document(text=text)
+            parser = SentenceSplitter(chunk_size=512, chunk_overlap=64)
+            nodes = parser.get_nodes_from_documents([document])
+
+            self.knowledge_base = VectorStoreIndex(nodes, embed_model=self.embed_model)
+            print("✅ پایگاه دانش RAG ایجاد شد")
+            return True
+
+        except Exception as e:
+            print(f"❌ خطا در ایجاد پایگاه دانش: {e}")
+            return False
+
+# ============================================================================
+# 🚀 بخش ۴: استخراج‌کننده متادیتا با قدرت API
+# ============================================================================
+
+class APIEnhancedMetadataExtractor:
+    """استخراج کننده متادیتا با قدرت API - نسخه تمرکز بر بخش‌های حیاتی"""
+
+    def __init__(self, rag_system):
+        self.rag_system = rag_system
+        self.setup_extraction_prompts()
+
+    def setup_extraction_prompts(self):
+        """تنظیم پرامپت‌های تخصصی استخراج با تمرکز بر بخش‌های حیاتی"""
+        self.extraction_prompts = {
+            'comprehensive': """
+            شما یک متخصص استخراج اطلاعات کتاب الکترونیکی هستید. لطفاً با دقت فوق‌العاده اطلاعات حیاتی زیر را از متن کتاب استخراج کنید:
+
+            متن کتاب:
+            {text}
+
+            🔍 **بخش‌های حیاتی برای استخراج**:
+
+            1. **عنوان کتاب** (ضروری)
+               - عنوان اصلی (ضروری)
+               - عنوان فرعی (در صورت وجود)
+               - توجه: عنوان کتاب معمولاً در صفحه اول (جلد) با فونت بزرگ نوشته می‌شود و در چند صفحه اول بارها تکرار می‌شود
+
+            2. **نام نویسنده/نویسندگان** (ضروری)
+               - نام کامل نویسنده اصلی
+               - نویسندگان همکار (در صورت وجود)
+
+            3. **مترجم** (ضروری برای کتاب‌های ترجمه)
+
+            4. **ناشر و سال انتشار** (ضروری)
+               - نام رسمی ناشر
+               - سال انتشار به عدد فارسی (مثلاً: ۱۳۹۷، ۱۴۰۰)
+               - توجه ویژه به الگوهای سال: "زمستان ۱۳۹۷"، "پاییز ۱۳۹۸"، "بهار ۱۴۰۱"
+
+            5. **شابک (ISBN یا eISBN)** (بسیار مهم)
+
+            6. **نوبت چاپ**
+
+            🎯 **قوانین استخراج دقیق**:
+            - برای سال انتشار، به دنبال الگوهای زیر باشید:
+              * "سال انتشار: ۱۳۹۷"
+              * "چاپ: ۱۳۹۸"
+              * "زمستان ۱۳۹۷"
+              * "۱۳۹۷"
+              * "© 2018" (و تبدیل به سال شمسی)
+            - اگر سال به صورت فصلی ذکر شده، فقط عدد سال را استخراج کنید
+            - اعداد را به صورت فارسی برگردانید
+            - مطمئن شوید سال انتشار ۴ رقمی است
+            - برای نویسنده و ناشر، کلمات را با فاصله صحیح بنویسید
+
+            📋 **فرمت خروجی JSON**:
+            {{
+                "title": "عنوان اصلی کتاب",
+                "author": "نام نویسنده اصلی",
+                "translator": "نام مترجم",
+                "publisher": "نام ناشر",
+                "publication_year": "سال انتشار",
+                "isbn": "شابک کتاب",
+                "edition": "نوبت چاپ"
+            }}
+
+            پاسخ را فقط به صورت JSON برگردانید:
+            """,
+
+            'validation': """
+            شما یک ویراستار متخصص کتاب‌های الکترونیکی هستید. لطفاً اطلاعات استخراج شده را با دقت اعتبارسنجی کنید:
+
+            متن کتاب: {text}
+
+            اطلاعات استخراج شده اولیه: {metadata}
+
+            🔎 **تمرکز بر بخش‌های حیاتی**:
+            1. عنوان - آیا دقیق و کامل است؟ (معمولاً در صفحه اول با فونت بزرگ است)
+            2. نویسنده - آیا نام کامل و صحیح است؟ (کلمات جدا باشد)
+            3. مترجم - آیا در کتاب‌های ترجمه وجود دارد؟
+            4. ناشر - آیا نام رسمی است؟ (کلمات جدا باشد)
+            5. سال انتشار - آیا پیدا شده و معتبر است؟
+            6. شابک - آیا فرمت صحیح دارد؟
+
+            ✅ **دستورالعمل اعتبارسنجی**:
+            - اطلاعات نادرست را تصحیح کنید
+            - اطلاعات ناقص را تکمیل کنید
+            - کلمات به هم چسبیده را جدا کنید (مثلاً: "مصطفیرعیتی" → "مصطفی رعیتی")
+            - مطمئن شوید سال انتشار حتماً استخراج شده باشد
+            - فقط اطلاعات تأیید شده را برگردانید
+
+            پاسخ را فقط به صورت JSON تصحیح شده برگردانید:
+            """,
+
+            'year_focused': """
+            شما در حال استخراج اطلاعات سال انتشار کتاب هستید. لطفاً با دقت بالا سال انتشار را از متن زیر پیدا کنید:
+
+            متن کتاب:
+            {text}
+
+            الگوهای سال انتشار:
+            - سال شمسی: ۱۳۹۵, ۱۳۹۶, ۱۳۹۷, ۱۳۹۸, ۱۳۹۹, ۱۴۰۰, ۱۴۰۱, ۱۴۰۲, ۱۴۰۳
+            - سال با فصل: "زمستان ۱۳۹۷", "بهار ۱۴۰۰", "پاییز ۱۳۹۸", "تابستان ۱۴۰۱"
+            - سال میلادی: 2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024
+            - الگوهای متداول: "سال انتشار:", "چاپ سال", "تاریخ انتشار", "نشر در سال"
+
+            فقط سال انتشار را به صورت عدد ۴ رقمی شمسی برگردانید. اگر پیدا نکردید "null" برگردانید.
+            """
+        }
+
+    def extract_with_api_power(self, text: str) -> Dict[str, Any]:
+        """استخراج متادیتا با قدرت API"""
+        print("🧠 استخراج متادیتا با قدرت API...")
+
+        if not self.rag_system.llm:
+            print("❌ API در دسترس نیست - استفاده از روش‌های معمولی")
+            return {}
+
+        try:
+            # مرحله 1: استخراج جامع با API
+            chunk = text[:3000]
+            prompt = self.extraction_prompts['comprehensive'].format(text=chunk)
+
+            initial_metadata = self._call_api_for_extraction(prompt)
+
+            if not initial_metadata:
+                return {}
+
+            # مرحله 2: اعتبارسنجی با API
+            validation_prompt = self.extraction_prompts['validation'].format(
+                text=chunk[:1500],
+                metadata=json.dumps(initial_metadata, ensure_ascii=False)
+            )
+
+            validated_metadata = self._call_api_for_extraction(validation_prompt)
+
+            # مرحله 3: ترکیب نتایج
+            fused_metadata = self._fusion_metadata(initial_metadata, validated_metadata)
+
+            # مرحله 4: پس‌پردازش و تصحیح
+            final_metadata = self._post_process_metadata(fused_metadata, text)
+
+            print("✅ استخراج با API تکمیل شد")
+            return final_metadata
+
+        except Exception as e:
+            print(f"❌ خطا در استخراج با API: {e}")
+            return {}
+
+    def _call_api_for_extraction(self, prompt: str) -> Dict[str, Any]:
+        """فراخوانی API برای استخراج"""
+        try:
+            from llama_index.core import Document
+            doc = Document(text=prompt)
+
+            query_engine = self.rag_system.knowledge_base.as_query_engine(
+                llm=self.rag_system.llm,
+                similarity_top_k=3,
+                response_mode="compact"
+            )
+
+            response = query_engine.query(prompt)
+            response_text = str(response).strip()
+
+            return self._extract_json_from_response(response_text)
+
+        except Exception as e:
+            print(f"⚠️ خطا در فراخوانی API: {e}")
+            return {}
+
+    def _extract_json_from_response(self, response: str) -> Dict[str, Any]:
+        """استخراج JSON از پاسخ API"""
+        try:
+            json_patterns = [
+                r'\{[^{}]*\}',
+                r'```json\s*(\{.*?\})\s*```',
+                r'```\s*(\{.*?\})\s*```'
+            ]
+
+            for pattern in json_patterns:
+                matches = re.findall(pattern, response, re.DOTALL)
+                for match in matches:
+                    try:
+                        if isinstance(match, tuple):
+                            match = match[0]
+                        return json.loads(match)
+                    except:
+                        continue
+
+            lines = response.split('\n')
+            json_like = {}
+
+            for line in lines:
+                line = line.strip()
+                if ':' in line and not line.startswith('{') and not line.startswith('}'):
+                    parts = line.split(':', 1)
+                    if len(parts) == 2:
+                        key, value = parts
+                        key = key.strip().strip('"\'')
+                        value = value.strip().strip('",\'')
+                        if key and value:
+                            json_like[key] = value
+
+            return json_like if json_like else {}
+
+        except Exception as e:
+            print(f"⚠️ خطا در استخراج JSON: {e}")
+            return {}
+
+    def _fusion_metadata(self, initial: Dict, validated: Dict) -> Dict[str, Any]:
+        """ترکیب هوشمند متادیتا"""
+        fused = initial.copy()
+
+        for key, value in validated.items():
+            if value and self._is_valid_value(key, value):
+                fused[key] = value
+
+        for key in list(fused.keys()):
+            if not self._is_valid_value(key, fused[key]):
+                del fused[key]
+
+        return fused
+
+    def _is_valid_value(self, key: str, value: Any) -> bool:
+        """اعتبارسنجی مقادیر با تمرکز بر بخش‌های حیاتی"""
+        if not value or value in ['پیدا نشد', 'مشخص نیست', 'null', 'None', '']:
+            return False
+
+        # قوانین اعتبارسنجی دقیق‌تر
+        validation_rules = {
+            'title': lambda v: 3 <= len(str(v)) <= 200 and len(re.findall(r'[آ-ی]', str(v))) >= 2,
+            'author': lambda v: 2 <= len(str(v)) <= 100 and len(re.findall(r'[آ-ی]', str(v))) >= 1,
+            'translator': lambda v: 2 <= len(str(v)) <= 80 and len(re.findall(r'[آ-ی]', str(v))) >= 1,
+            'publisher': lambda v: 2 <= len(str(v)) <= 100 and len(re.findall(r'[آ-ی]', str(v))) >= 1,
+            'publication_year': lambda v: self._is_valid_year(v),
+            'isbn': lambda v: 5 <= len(str(v)) <= 20 and any(char.isdigit() or char in ['-', ' '] for char in str(v)),
+            'edition': lambda v: 1 <= len(str(v)) <= 20,
+        }
+
+        validator = validation_rules.get(key, lambda v: bool(v and str(v).strip()))
+        return validator(value)
+
+    def _is_valid_year(self, year: Any) -> bool:
+        """اعتبارسنجی سال"""
+        if not year:
+            return False
+
+        year_str = str(year)
+        if len(year_str) != 4:
+            return False
+
+        # سال باید بین ۱۳۰۰ تا ۱۴۰۵ باشد
+        if year_str.startswith(('۱۳', '۱۴')):
+            try:
+                year_num = int(year_str)
+                return 1300 <= year_num <= 1405
+            except:
+                return False
+        return False
+
+    def _post_process_metadata(self, metadata: Dict[str, Any], text: str) -> Dict[str, Any]:
+        """پس‌پردازش و تصحیح متادیتا"""
+        processed = metadata.copy()
+
+        # تصحیح کلمات به هم چسبیده با الگوهای فارسی
+        correction_patterns = {
+            'author': [
+                (r'مصطفی', 'مصطفی '),
+                (r'رعیتی', ' رعیتی'),
+                (r'محمد', 'محمد '),
+                (r'احمد', 'احمد '),
+                (r'حسین', 'حسین '),
+                (r'علی', 'علی '),
+                (r'(\w{4,})(\w{4,})', r'\1 \2')  # جدا کردن کلمات طولانی به هم چسبیده
+            ],
+            'publisher': [
+                (r'زمزم', 'زمزم '),
+                (r'سحر', ' سحر'),
+                (r'انتشارات', 'انتشارات '),
+                (r'نشر', 'نشر '),
+                (r'(\w{3,})(\w{3,})', r'\1 \2')  # جدا کردن کلمات به هم چسبیده
+            ],
+            'title': [
+                (r'(\w{4,})(\w{4,})', r'\1 \2')  # جدا کردن کلمات طولانی در عنوان
+            ]
+        }
+
+        for field, patterns in correction_patterns.items():
+            if field in processed and processed[field]:
+                original = str(processed[field])
+                for pattern, replacement in patterns:
+                    original = re.sub(pattern, replacement, original)
+                # حذف فاصله‌های اضافی
+                processed[field] = re.sub(r'\s+', ' ', original).strip()
+
+        # استخراج اختصاصی سال انتشار اگر پیدا نشده
+        if not processed.get('publication_year'):
+            year = self._extract_year_specialized(text)
+            if year:
+                processed['publication_year'] = year
+                print(f"✅ سال انتشار پس‌پردازش: {year}")
+            else:
+                # تلاش با API متمرکز بر سال
+                year = self._extract_year_fallback(text)
+                if year:
+                    processed['publication_year'] = year
+                    print(f"✅ سال انتشار با API متمرکز: {year}")
+
+        return processed
+
+    def _extract_year_specialized(self, text: str) -> str:
+        """استخراج تخصصی سال انتشار از متن"""
+        # الگوهای مختلف سال
+        year_patterns = [
+            r'سال\s*انتشار\s*[:\-]\s*([۱۳۴۰-۹]{4})',
+            r'چاپ\s*[:\-]\s*.*?([۱۳۴۰-۹]{4})',
+            r'تاریخ\s*انتشار\s*[:\-]\s*([۱۳۴۰-۹]{4})',
+            r'زمستان\s*([۱۳۴۰-۹]{4})',
+            r'بهار\s*([۱۳۴۰-۹]{4})',
+            r'تابستان\s*([۱۳۴۰-۹]{4})',
+            r'پاییز\s*([۱۳۴۰-۹]{4})',
+            r'([۱۳۴۰-۹]{4})\s*خورشیدی',
+            r'©\s*\d{4}.*?([۱۳۴۰-۹]{4})',
+            r'نشر\s*.*?([۱۳۴۰-۹]{4})',
+            r'انتشار\s*.*?([۱۳۴۰-۹]{4})'
+        ]
+
+        for pattern in year_patterns:
+            match = re.search(pattern, text)
+            if match:
+                year = match.group(1)
+                if self._is_valid_year(year):
+                    return year
+
+        # جستجوی ساده‌تر برای هر عدد ۴ رقمی فارسی
+        simple_year_match = re.findall(r'[۱۳۴۰-۹]{4}', text)
+        for year in simple_year_match:
+            if self._is_valid_year(year):
+                # بررسی کنار بودن با کلمات کلیدی
+                context_pattern = rf'.{{0,20}}{year}.{{0,20}}'
+                context_match = re.search(context_pattern, text)
+                if context_match:
+                    context = context_match.group()
+                    year_indicators = ['چاپ', 'انتشار', 'نشر', 'سال', 'تاریخ']
+                    if any(indicator in context for indicator in year_indicators):
+                        return year
+
+        return ""
+
+    def _extract_year_fallback(self, text: str) -> str:
+        """روش جایگزین برای استخراج سال انتشار"""
+        print("🔍 جستجوی اختصاصی برای سال انتشار...")
+
+        # استفاده از API برای استخراج اختصاصی سال
+        if self.rag_system.llm:
+            try:
+                year_prompt = self.extraction_prompts['year_focused'].format(text=text[:2000])
+                from llama_index.core import Document
+                doc = Document(text=year_prompt)
+
+                query_engine = self.rag_system.knowledge_base.as_query_engine(
+                    llm=self.rag_system.llm
+                )
+
+                response = query_engine.query(year_prompt)
+                response_text = str(response).strip()
+
+                # استخراج سال از پاسخ
+                year_match = re.search(r'[۱۳۴۰-۹]{4}', response_text)
+                if year_match and self._is_valid_year(year_match.group()):
+                    return year_match.group()
+
+            except Exception as e:
+                print(f"⚠️ خطا در استخراج سال با API: {e}")
+
+        return ""
+
+    def _is_translation_book(self, text: str) -> bool:
+        """تشخیص اینکه آیا کتاب ترجمه است"""
+        translation_indicators = [
+            'ترجمه', 'مترجم', 'translate', 'translation', 'ترجمه شده',
+            'منبع اصلی', 'کتاب اصلی', 'نویسنده اصلی', 'برگردان'
+        ]
+
+        text_lower = text.lower()
+        return any(indicator in text_lower for indicator in translation_indicators)
+
+# ============================================================================
+# 📝 بخش ۵: استخراج‌کننده ساده (پشتیبان)
+# ============================================================================
+
+class SimpleBookExtractor:
+    """استخراج ساده اطلاعات کتاب"""
+
+    def extract_basic_info(self, text: str) -> Dict[str, Any]:
+        """استخراج اطلاعات پایه"""
+        results = {}
+        lines = text.split('\n')
+
+        for i, line in enumerate(lines):
+            line = line.strip()
+            if not line:
+                continue
+
+            title = self._extract_title(line, i, lines)
+            if title and 'title' not in results:
+                results['title'] = title
+
+            year = self._extract_year(line)
+            if year and 'year' not in results:
+                results['year'] = year
+
+            edition = self._extract_edition(line)
+            if edition and 'edition' not in results:
+                results['edition'] = edition
+
+            author = self._extract_author(line)
+            if author and 'author' not in results:
+                results['author'] = author
+
+            translator = self._extract_translator(line)
+            if translator and 'translator' not in results:
+                results['translator'] = translator
+
+        return results
+
+    def _extract_title(self, line: str, line_num: int, all_lines: List[str]) -> str:
+        """استخراج عنوان - بهبود: تمرکز بر صفحات اول و تکرارهای زیاد"""
+        title_patterns = [
+            r'عنوان\s*[:\-]\s*(.+)',
+            r'نام کتاب\s*[:\-]\s*(.+)',
+            r'کتاب\s+(.+)',
+        ]
+
+        for pattern in title_patterns:
+            match = re.search(pattern, line, re.IGNORECASE)
+            if match:
+                title = match.group(1).strip()
+                if self._is_valid_title(title):
+                    return title
+
+        # تغییر: تمرکز بر صفحات اول (خطوط اولیه) و خطوطی که بارها تکرار شده‌اند
+        if line_num < 20:  # صفحات اول
+            if len(line) > 10 and len(line) < 100:
+                if not any(keyword in line for keyword in ['نویسنده', 'مؤلف', 'ناشر', 'چاپ', 'شابک', 'مترجم']):
+                    if self._is_valid_title(line):
+                        # بررسی تکرار این خط در کل متن
+                        line_count = sum(1 for l in all_lines if l.strip() == line.strip())
+                        if line_count >= 2:  # اگر حداقل 2 بار تکرار شده باشد
+                            return line
+
+        return ""
+
+    def _extract_year(self, line: str) -> str:
+        """استخراج سال"""
+        year_patterns = [
+            r'۱۳[۷-۹][۰-۹]',
+            r'۱۴۰[۰-۴]',
+            r'سال\s*انتشار\s*[:\-]\s*([۱۳۴۰-۹]{4})',
+            r'چاپ\s*[:\-]\s*.*?([۱۳۴۰-۹]{4})'
+        ]
+        for pattern in year_patterns:
+            match = re.search(pattern, line)
+            if match:
+                year = match.group(1) if match.groups() else match.group()
+                if self._is_valid_year(year):
+                    return year
+        return ""
+
+    def _extract_edition(self, line: str) -> str:
+        """استخراج نوبت چاپ"""
+        edition_patterns = [
+            r'چاپ\s*(\d+)',
+            r'نوبت چاپ\s*[:\-]\s*(\d+)',
+            r'چاپ\s*(اول|دوم|سوم|چهارم|پنجم|ششم|هفتم|هشتم|نهم|دهم)',
+        ]
+        for pattern in edition_patterns:
+            match = re.search(pattern, line, re.IGNORECASE)
+            if match:
+                return match.group(1) if match.groups() else match.group(0)
+        return ""
+
+    def _extract_author(self, line: str) -> str:
+        """استخراج نویسنده"""
+        author_patterns = [
+            r'نویسنده\s*[:\-]\s*(.+)',
+            r'مؤلف\s*[:\-]\s*(.+)',
+            r'تألیف\s*[:\-]\s*(.+)',
+        ]
+        for pattern in author_patterns:
+            match = re.search(pattern, line, re.IGNORECASE)
+            if match:
+                author = match.group(1).strip()
+                if self._is_valid_author(author):
+                    return author
+        return ""
+
+    def _extract_translator(self, line: str) -> str:
+        """استخراج مترجم"""
+        translator_patterns = [
+            r'مترجم\s*[:\-]\s*(.+)',
+            r'ترجمه\s*[:\-]\s*(.+)',
+            r'برگردان\s*[:\-]\s*(.+)',
+        ]
+        for pattern in translator_patterns:
+            match = re.search(pattern, line, re.IGNORECASE)
+            if match:
+                translator = match.group(1).strip()
+                if self._is_valid_translator(translator):
+                    return translator
+        return ""
+
+    def _is_valid_title(self, text: str) -> bool:
+        """اعتبارسنجی عنوان"""
+        return (5 <= len(text) <= 150 and
+                len(re.findall(r'[آ-ی]', text)) >= 2 and
+                not any(word in text for word in ['نویسنده', 'مؤلف', 'ناشر', 'چاپ', 'شابک', 'مترجم']))
+
+    def _is_valid_author(self, text: str) -> bool:
+        """اعتبارسنجی نویسنده"""
+        return (3 <= len(text) <= 80 and
+                len(re.findall(r'[آ-ی]', text)) >= 1)
+
+    def _is_valid_translator(self, text: str) -> bool:
+        """اعتبارسنجی مترجم"""
+        return (3 <= len(text) <= 80 and
+                len(re.findall(r'[آ-ی]', text)) >= 1)
+
+    def _is_valid_year(self, year: str) -> bool:
+        """اعتبارسنجی سال"""
+        if not year or len(year) != 4:
+            return False
+        return year.startswith(('۱۳', '۱۴'))
+
+    def extract_additional_info(self, text: str) -> Dict[str, Any]:
+        """استخراج اطلاعات تکمیلی"""
+        results = {}
+
+        patterns = {
+            'publisher': r'ناشر\s*[:\-]\s*(.+)',
+            'isbn': r'شابک\s*[:\-]\s*([۰-۹\-–]+)',
+            'price': r'قیمت\s*[:\-]\s*([۰-۹,]+)\s*تومان',
+            'translator': r'مترجم\s*[:\-]\s*(.+)',
+            'subject': r'موضوع\s*[:\-]\s*(.+)'
+        }
+
+        for field, pattern in patterns.items():
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                results[field] = match.group(1).strip()
+
+        return results
+
+# ============================================================================
+# 🔄 بخش ۶: پردازشگر اصلی با قدرت API
+# ============================================================================
+
+class UltraAccuracyBookProcessor:
+    """پردازشگر اصلی با قدرت API در هسته مرکزی"""
+
+    def __init__(self):
+        self.ai_models = HighAccuracyAIModels()
+        self.ocr_engine = UltraAccuracyOCREngine(self.ai_models)
+        self.rag_system = AdvancedRAGSystem()
+        self.api_extractor = APIEnhancedMetadataExtractor(self.rag_system)
+        self.simple_extractor = SimpleBookExtractor()
+
+    def process_book_ultra_accurate(self, input_file) -> Dict[str, Any]:
+        """پردازش کتاب با قدرت API"""
+        print("🚀 شروع پردازش با دقت فوق‌العاده + API...")
+
+        start_time = datetime.now()
+
+        # استخراج متن
+        raw_text, ocr_results = self.ocr_engine.extract_text_ultra_accurate(input_file)
+
+        if not raw_text or len(raw_text.strip()) < 10:
+            return self._create_error_result("متن کافی استخراج نشد", ocr_results, start_time)
+
+        print(f"📖 متن استخراج شده: {len(raw_text)} کاراکتر")
+
+        # ایجاد پایگاه دانش برای API
+        rag_ready = self.rag_system.create_knowledge_base(raw_text)
+
+        if rag_ready:
+            # استخراج اصلی با قدرت API
+            print("🧠 استخراج اطلاعات با قدرت API...")
+            api_metadata = self.api_extractor.extract_with_api_power(raw_text)
+
+            # استخراج پشتیبان با روش‌های معمولی
+            backup_metadata = self._extract_backup_metadata(raw_text)
+
+            # ترکیب نهایی با اولویت API
+            final_metadata = self._final_fusion(api_metadata, backup_metadata, raw_text)
+        else:
+            # فقط روش‌های معمولی
+            print("⚠️ استفاده از روش‌های معمولی (API در دسترس نیست)")
+            final_metadata = self._extract_backup_metadata(raw_text)
+
+        # ایجاد نتایج نهایی
+        results = self._create_final_results(final_metadata, raw_text, ocr_results,
+                                           rag_ready, start_time, input_file)
+
+        return results
+
+    def _extract_backup_metadata(self, text: str) -> Dict[str, Any]:
+        """استخراج پشتیبان با روش‌های معمولی"""
+        basic = self.simple_extractor.extract_basic_info(text)
+        additional = self.simple_extractor.extract_additional_info(text)
+
+        return {
+            'basic_info': basic,
+            'additional_info': additional
+        }
+
+    def _final_fusion(self, api_metadata: Dict, backup_metadata: Dict, text: str) -> Dict[str, Any]:
+        """ترکیب نهایی با اولویت API و تمرکز بر بخش‌های حیاتی"""
+        final = {
+            'basic_info': backup_metadata.get('basic_info', {}).copy(),
+            'additional_info': backup_metadata.get('additional_info', {}).copy(),
+            'api_enhanced': True
+        }
+
+        # بخش‌های حیاتی که حتماً باید از API استفاده کنند
+        critical_fields = ['title', 'author', 'translator', 'publisher', 'publication_year', 'isbn', 'edition']
+
+        if api_metadata:
+            for field in critical_fields:
+                if api_metadata.get(field):
+                    final['basic_info'][field] = api_metadata[field]
+                    print(f"✅ API تعیین کرد ({field}): {api_metadata[field]}")
+                elif field == 'translator' and self.api_extractor._is_translation_book(text):
+                    print(f"⚠️ هشدار: کتاب ترجمه است اما مترجم پیدا نشد!")
+
+            # سایر فیلدها
+            additional_fields = ['subject', 'genre']
+            for field in additional_fields:
+                if api_metadata.get(field):
+                    final['additional_info'][field] = api_metadata[field]
+
+        return final
+
+    def _create_final_results(self, metadata: Dict, text: str, ocr_results: Dict,
+                            rag_ready: bool, start_time: datetime, input_file) -> Dict[str, Any]:
+        """ایجاد ساختار نهایی نتایج"""
+
+        return {
+            'basic_info': metadata.get('basic_info', {}),
+            'additional_info': metadata.get('additional_info', {}),
+            'file_info': self._get_file_info(input_file),
+            'processing_time': (datetime.now() - start_time).total_seconds(),
+            'ocr_analysis': ocr_results,
+            'rag_available': rag_ready,
+            'api_enhanced': metadata.get('api_enhanced', False),
+            'text_sample': text[:500] + "..." if len(text) > 500 else text,
+            'processing_date': datetime.now().isoformat(),
+            'total_text_length': len(text)
+        }
+
+    def _create_error_result(self, error: str, ocr_results: Dict, start_time: datetime):
+        """ایجاد نتیجه خطا"""
+        return {
+            'error': error,
+            'processing_time': (datetime.now() - start_time).total_seconds(),
+            'ocr_analysis': ocr_results
+        }
+
+    def _get_file_info(self, input_file) -> Dict[str, Any]:
+        """اطلاعات فایل"""
+        if isinstance(input_file, str):
+            return {
+                'file_name': os.path.basename(input_file),
+                'file_type': 'PDF' if input_file.lower().endswith('.pdf') else 'Image'
+            }
+        else:
+            return {
+                'file_name': 'uploaded_file',
+                'file_type': 'Image'
+            }
+
+print("✅ تمام کلاس‌های اصلی تعریف شدند")
+
+# ============================================================================
+# 🎨 بخش ۷: رابط گریدو - رابط کاربری مصور - تغییر: حذف تب پرسش و پاسخ
+# ============================================================================
+
+class GradioBookExtractorUI:
+    """رابط کاربری گریدو برای سیستم استخراج کتاب"""
+
+    def __init__(self):
+        self.processor = None
+        self.current_results = None
+
+    def initialize_processor(self):
+        """مقداردهی اولیه پردازشگر"""
+        if self.processor is None:
+            try:
+                print("🚀 در حال راه‌اندازی سیستم پردازش پیشرفته...")
+                self.processor = UltraAccuracyBookProcessor()
+                return "✅ سیستم پردازش با موفقیت راه‌اندازی شد!"
+            except Exception as e:
+                error_msg = f"❌ خطا در راه‌اندازی سیستم: {str(e)}"
+                print(error_msg)
+                return error_msg
+        return "✅ سیستم از قبل راه‌اندازی شده است"
+
+    def process_uploaded_file(self, file):
+        """پردازش فایل آپلود شده"""
+        if file is None:
+            return "⚠️ لطفاً یک فایل آپلود کنید", "هیچ فایلی انتخاب نشده است"
+
+        try:
+            # مقداردهی اولیه پردازشگر
+            init_msg = self.initialize_processor()
+            if "❌" in init_msg:
+                return init_msg, "خطا در راه‌اندازی سیستم"
+
+            print(f"📁 پردازش فایل: {file.name}")
+            # پردازش فایل
+            results = self.processor.process_book_ultra_accurate(file.name)
+            self.current_results = results
+
+            # نمایش نتایج
+            display_text = self._format_results_for_display(results)
+
+            # ایجاد گزارش
+            report_text = self._create_detailed_report(results)
+
+            print("✅ پردازش کامل شد")
+            return display_text, report_text
+
+        except Exception as e:
+            error_msg = f"❌ خطا در پردازش فایل: {str(e)}"
+            print(error_msg)
+            return error_msg, error_msg
+
+    def _format_results_for_display(self, results):
+        """فرمت‌بندی نتایج برای نمایش"""
+        if 'error' in results:
+            return f"## ❌ خطا\n\n{results['error']}"
+
+        basic_info = results.get('basic_info', {})
+        additional_info = results.get('additional_info', {})
+
+        output = "## 🎯 نتایج استخراج اطلاعات کتاب\n\n"
+        output += "### 📚 اطلاعات اصلی کتاب\n\n"
+
+        # فیلدهای حیاتی
+        fields = [
+            ('title', '📖 عنوان کتاب'),
+            ('author', '✍️ نویسنده/مؤلف'),
+            ('translator', '🔤 مترجم'),
+            ('publisher', '🏢 ناشر'),
+            ('publication_year', '📅 سال انتشار'),
+            ('isbn', '🔢 شابک (ISBN)'),
+            ('edition', '🔄 نوبت چاپ')
+        ]
+
+        for field, display in fields:
+            value = basic_info.get(field, "")
+            if value:
+                source = "🤖 API" if results.get('api_enhanced') else "🔍 الگو"
+                output += f"- **{display}:** `{value}` ({source})\n"
+            else:
+                output += f"- **{display}:** ❌ پیدا نشد\n"
+
+        # اطلاعات تکمیلی
+        if additional_info:
+            output += "\n### 📋 اطلاعات تکمیلی\n\n"
+            for key, value in additional_info.items():
+                if value:
+                    output += f"- **{key}:** `{value}`\n"
+
+        # اطلاعات فنی
+        output += f"\n### 🔧 اطلاعات فنی\n\n"
+        output += f"- **زمان پردازش:** {results.get('processing_time', 0):.2f} ثانیه\n"
+        output += f"- **طول متن:** {results.get('total_text_length', 0)} کاراکتر\n"
+        output += f"- **قدرت API:** {'فعال ✅' if results.get('api_enhanced') else 'غیرفعال ⚠️'}\n"
+        output += f"- **سیستم RAG:** {'آماده ✅' if results.get('rag_available') else 'غیرفعال ⚠️'}\n"
+
+        return output
+
+    def _create_detailed_report(self, results):
+        """ایجاد گزارش دقیق"""
+        if 'error' in results:
+            return f"خطا: {results['error']}"
+
+        report = "📊 گزارش کامل تحلیل کتاب\n"
+        report += "=" * 50 + "\n\n"
+
+        # اطلاعات اصلی
+        basic_info = results.get('basic_info', {})
+        report += "📚 اطلاعات شناسنامه کتاب:\n"
+        report += "-" * 30 + "\n"
+
+        critical_fields = {
+            'title': 'عنوان اصلی',
+            'author': 'نویسنده/مؤلف',
+            'translator': 'مترجم',
+            'publisher': 'ناشر',
+            'publication_year': 'سال انتشار',
+            'isbn': 'شابک',
+            'edition': 'نوبت چاپ'
+        }
+
+        for field, title in critical_fields.items():
+            value = basic_info.get(field, "❌ پیدا نشد")
+            report += f"- {title}: {value}\n"
+
+        # اطلاعات فنی
+        report += "\n🔧 اطلاعات فنی پردازش:\n"
+        report += "-" * 30 + "\n"
+        report += f"- زمان پردازش: {results.get('processing_time', 0):.2f} ثانیه\n"
+        report += f"- طول متن استخراج شده: {results.get('total_text_length', 0)} کاراکتر\n"
+        report += f"- سیستم API: {'فعال' if results.get('api_enhanced') else 'غیرفعال'}\n"
+        report += f"- سیستم پرسش و پاسخ: {'فعال' if results.get('rag_available') else 'غیرفعال'}\n"
+
+        # اطلاعات OCR
+        ocr_info = results.get('ocr_analysis', {})
+        if 'quality_metrics' in ocr_info:
+            quality = ocr_info['quality_metrics']
+            report += "\n📝 کیفیت استخراج متن:\n"
+            report += "-" * 25 + "\n"
+            report += f"- امتیاز کلی کیفیت: {quality.get('overall_score', 0):.2f}/1.0\n"
+            report += f"- تعداد خطوط: {quality.get('line_count', 0)}\n"
+            report += f"- نسبت متن فارسی: {quality.get('persian_ratio', 0)*100:.1f}%\n"
+
+        report += f"\n🕒 تاریخ پردازش: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+
+        return report
+
+    def save_results(self):
+        """ذخیره نتایج"""
+        if self.current_results is None:
+            return None, "⚠️ هیچ نتیجه‌ای برای ذخیره کردن وجود ندارد"
+
+        try:
+            # ایجاد فایل موقت برای ذخیره
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+            # ذخیره JSON
+            json_content = json.dumps(self.current_results, ensure_ascii=False, indent=2)
+            json_filename = f"book_results_{timestamp}.json"
+
+            # ذخیره گزارش متنی
+            report_content = self._create_detailed_report(self.current_results)
+            txt_filename = f"book_report_{timestamp}.txt"
+
+            print(f"💾 نتایج ذخیره شد: {json_filename}, {txt_filename}")
+
+            return [
+                (json_filename, json_content),
+                (txt_filename, report_content)
+            ], "✅ نتایج با موفقیت ذخیره شدند"
+
+        except Exception as e:
+            error_msg = f"❌ خطا در ذخیره نتایج: {str(e)}"
+            print(error_msg)
+            return None, error_msg
+
+def create_gradio_interface():
+    """ایجاد رابط گریدو - تغییر: حذف تب پرسش و پاسخ"""
+
+    ui = GradioBookExtractorUI()
+
+    with gr.Blocks(
+        title="سیستم استخراج اطلاعات کتاب با قدرت API",
+        theme=gr.themes.Soft(),
+        css="""
+        .gradio-container {
+            font-family: 'Tahoma', 'Arial', sans-serif;
+        }
+        .success { color: #00aa00; font-weight: bold; }
+        .warning { color: #ffaa00; font-weight: bold; }
+        .error { color: #ff0000; font-weight: bold; }
+        """
+    ) as interface:
+
+        gr.Markdown("""
+        <div style="text-align: center;">
+            <h1>📚 سیستم استخراج اطلاعات کتاب با قدرت API</h1>
+            <p><strong>نسخه پیشرفته - تمرکز بر بخش‌های حیاتی کتاب</strong></p>
+            <p style="color: #666; font-size: 0.9em;">
+                🤖 OCR فوق‌العاده • 🧠 RAG پیشرفته • 🔗 قدرت API • ✅ اعتبارسنجی هوشمند
+            </p>
+        </div>
+        """)
+
+        with gr.Tab("📁 آپلود و پردازش فایل"):
+            gr.Markdown("### آپلود فایل کتاب برای پردازش پیشرفته")
+
+            with gr.Row():
+                with gr.Column():
+                    file_input = gr.File(
+                        label="فایل کتاب (PDF یا تصویر)",
+                        file_types=[".pdf", ".jpg", ".jpeg", ".png"],
+                        type="filepath"
+                    )
+                    process_btn = gr.Button("🚀 شروع پردازش", variant="primary")
+
+                with gr.Column():
+                    init_status = gr.Textbox(
+                        label="وضعیت سیستم",
+                        value="⏳ در انتظار راه‌اندازی...",
+                        interactive=False
+                    )
+
+            with gr.Row():
+                with gr.Column():
+                    results_display = gr.Markdown(
+                        label="نتایج استخراج",
+                        value="**📋 نتایج در اینجا نمایش داده می‌شود...**\n\nپس از آپلود فایل، دکمه 'شروع پردازش' را بزنید."
+                    )
+
+                with gr.Column():
+                    detailed_report = gr.Textbox(
+                        label="گزارش کامل",
+                        lines=12,
+                        max_lines=15,
+                        interactive=False
+                    )
+
+        # تغییر: حذف تب پرسش و پاسخ
+
+        with gr.Tab("💾 ذخیره نتایج"):
+            gr.Markdown("### ذخیره نتایج استخراج")
+
+            with gr.Row():
+                with gr.Column():
+                    save_btn = gr.Button("💾 ذخیره نتایج", variant="primary")
+                    save_status = gr.Markdown(label="وضعیت ذخیره")
+
+                with gr.Column():
+                    download_output = gr.File(
+                        label="فایل‌های قابل دانلود",
+                        file_count="multiple",
+                        interactive=False
+                    )
+
+            gr.Markdown("""
+            ### 📊 اطلاعات ذخیره شده:
+            - **فایل JSON:** شامل تمام اطلاعات استخراج شده به صورت ساختاریافته
+            - **گزارش متنی:** خلاصه خواندنی از نتایج استخراج
+            """)
+
+        with gr.Tab("ℹ️ راهنما"):
+            gr.Markdown("""
+            ## 📖 راهنمای استفاده از سیستم
+
+            ### 🔍 قابلیت‌های اصلی:
+            1. **استخراج خودکار اطلاعات کتاب** از فایل‌های PDF و تصاویر
+            2. **تشخیص بخش‌های حیاتی** شامل:
+               - عنوان کتاب (تمرکز بر صفحه اول و تکرارها)
+               - نویسنده/مؤلف
+               - مترجم (برای کتاب‌های ترجمه)
+               - ناشر
+               - سال انتشار
+               - شابک (ISBN)
+               - نوبت چاپ
+
+            3. **ذخیره نتایج** در قالب‌های مختلف
+
+            ### 📁 فرمت‌های پشتیبانی شده:
+            - فایل‌های PDF (۸ صفحه اول پردازش می‌شود)
+            - فایل‌های تصویری: JPG, JPEG, PNG
+
+            ### 🎯 دقت سیستم:
+            - استفاده از **مدل‌های هوش مصنوعی پیشرفته**
+            - **ترکیب هوشمند** چندین موتور OCR
+            - **اعتبارسنجی خودکار** اطلاعات استخراج شده
+            - **تمرکز ویژه** بر کتاب‌های فارسی
+
+            ### ⚠️ نکات مهم:
+            - کیفیت فایل ورودی直接影响 دقت استخراج
+            - برای بهترین نتایج، از فایل‌های با وضوح بالا استفاده کنید
+            - سیستم برای کتاب‌های فارسی بهینه شده است
+            - پردازش ممکن است ۳۰-۶۰ ثانیه زمان ببرد
+            - برای استفاده از قابلیت‌های پیشرفته API، باید API Key OpenRouter داشته باشید
+
+            ### 🔑 تنظیم API:
+            برای استفاده از قابلیت‌های پیشرفته:
+            1. به [OpenRouter](https://openrouter.ai) بروید
+            2. حساب کاربری ایجاد کنید
+            3. API Key دریافت کنید
+            4. در هنگام اجرا، API Key را وارد کنید
+            """)
+
+        # رویدادها
+        process_btn.click(
+            fn=ui.initialize_processor,
+            outputs=init_status
+        ).then(
+            fn=ui.process_uploaded_file,
+            inputs=file_input,
+            outputs=[results_display, detailed_report]
+        )
+
+        save_btn.click(
+            fn=ui.save_results,
+            outputs=[download_output, save_status]
+        )
+
+    return interface
+
+# ============================================================================
+# 🚀 اجرای برنامه اصلی
+# ============================================================================
+
+def main():
+    """برنامه اصلی"""
+    print("=" * 70)
+    print("📚 سیستم استخراج اطلاعات کتاب با قدرت API")
+    print("🎨 رابط گریدو - نسخه مصور")
+    print("=" * 70)
+    print("\nویژگی‌های فعال:")
+    print("  🤖 OCR با دقت فوق‌العاده (۸ صفحه اول)")
+    print("  🧠 سیستم RAG پیشرفته")
+    print("  🔗 استخراج با قدرت API")
+    print("  ✅ اعتبارسنجی هوشمند")
+    print("  📊 گزارش‌گیری کامل")
+    print("\n" + "=" * 70)
+
+    # راه‌اندازی رابط گریدو
+    print("🚀 در حال راه‌اندازی رابط گریدو...")
+    interface = create_gradio_interface()
+
+    # راه‌اندازی با تنظیمات بهینه
+    interface.launch(
+        share=True,
+        debug=False,
+        show_error=True
+    )
+
+# ============================================================================
+# 🚀 اجرای برنامه
+# ============================================================================
+
+if __name__ == "__main__":
+    main()
