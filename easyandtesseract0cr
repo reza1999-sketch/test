@@ -1,0 +1,1517 @@
+# 📚 سیستم کامل استخراج اطلاعات کتاب با قدرت API
+# 🚀 نسخه پیشرفته - رابط Gradio - طراحی سبز و مشکی
+
+# ============================================================================
+# 📦 نصب و راه‌اندازی کتابخانه‌ها
+# ============================================================================
+
+print("📦 در حال نصب و راه‌اندازی کتابخانه‌ها...")
+
+!pip install transformers torch torchvision torchaudio -q
+!pip install pillow pytesseract pdf2image -q
+!pip install easyocr sentence-transformers scikit-learn -q
+!pip install persian-tools arabic-reshaper python-bidi -q
+!pip install spacy rapidfuzz -q
+!pip install llama-index-core llama-index-llms-openrouter llama-index-readers-file -q
+!pip install llama-index-embeddings-huggingface python-dotenv -q
+!pip install gradio -q
+!python -m spacy download en_core_web_sm -q
+!apt-get install -y tesseract-ocr-fas poppler-utils -qq
+
+print("✅ کتابخانه‌ها نصب شدند")
+
+# ============================================================================
+# 🔧 Import کتابخانه‌ها
+# ============================================================================
+
+import pytesseract
+from pdf2image import convert_from_path
+from PIL import Image, ImageEnhance, ImageFilter
+import re
+import json
+from typing import Dict, Any, List, Tuple, Optional
+from google.colab import files
+import os
+from datetime import datetime
+import easyocr
+import numpy as np
+from transformers import pipeline, AutoTokenizer, AutoModel, AutoModelForTokenClassification
+from sentence_transformers import SentenceTransformer, util
+import torch
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.neighbors import NearestNeighbors
+from sklearn.ensemble import RandomForestClassifier
+import arabic_reshaper
+from bidi.algorithm import get_display
+import cv2
+from collections import Counter
+import spacy
+from rapidfuzz import fuzz, process
+import tempfile
+import requests
+from pathlib import Path
+import concurrent.futures
+import gradio as gr
+import time
+import threading
+from queue import Queue
+
+# تنظیم مسیر Tesseract برای Colab
+pytesseract.pytesseract.tesseract_cmd = '/usr/bin/tesseract'
+
+print("🔧 تنظیمات اولیه انجام شد")
+
+# ============================================================================
+# 🧠 بخش ۱: مدل‌های هوش مصنوعی با دقت بالا - بهینه‌سازی بارگذاری
+# ============================================================================
+
+class HighAccuracyAIModels:
+    """مدل‌های هوش مصنوعی با دقت فوق العاده"""
+
+    def __init__(self):
+        self.setup_high_accuracy_models()
+
+    def setup_high_accuracy_models(self):
+        """بارگذاری همزمان مدل‌های با دقت بالا"""
+        print("🧠 در حال بارگذاری همزمان مدل‌ها...")
+
+        # بررسی دستگاه
+        self.device = 0 if torch.cuda.is_available() else -1
+        print(f"🔧 دستگاه شناسایی شده: {'GPU' if self.device == 0 else 'CPU'}")
+
+        # بارگذاری موازی مدل‌ها
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            futures = {
+                executor.submit(self._load_ner_model): "NER",
+                executor.submit(self._load_text_model): "Text",
+                executor.submit(self._load_embedding_model): "Embedding",
+                executor.submit(self._load_easyocr): "EasyOCR"
+            }
+            
+            for future in concurrent.futures.as_completed(futures):
+                model_name = futures[future]
+                try:
+                    future.result()
+                    print(f"✅ مدل {model_name} بارگذاری شد")
+                except Exception as e:
+                    print(f"⚠️ خطا در بارگذاری مدل {model_name}: {e}")
+
+        # بارگذاری SpaCy
+        try:
+            self.nlp = spacy.load("en_core_web_sm")
+            print("✅ مدل SpaCy بارگذاری شد")
+        except:
+            print("⚠️ مدل SpaCy بارگذاری نشد")
+            self.nlp = None
+
+        # داده‌های آموزشی پیشرفته
+        self.setup_advanced_training_data()
+
+    def _load_ner_model(self):
+        """بارگذاری مدل NER"""
+        try:
+            self.ner_model_name = "HooshvareLab/bert-fa-zwnj-base-ner"
+            tokenizer = AutoTokenizer.from_pretrained(self.ner_model_name)
+            model = AutoModelForTokenClassification.from_pretrained(
+                self.ner_model_name,
+                device_map="auto" if self.device == 0 else None
+            )
+            self.ner_pipeline = pipeline(
+                "token-classification",
+                model=model,
+                tokenizer=tokenizer,
+                aggregation_strategy="max",
+                device=self.device
+            )
+        except Exception as e:
+            print(f"⚠️ خطا در بارگذاری NER: {e}")
+            self.ner_pipeline = None
+
+    def _load_text_model(self):
+        """بارگذاری مدل زبانی"""
+        try:
+            self.text_model = pipeline(
+                "text-classification",
+                model="HooshvareLab/bert-fa-base-uncased",
+                device=self.device
+            )
+        except Exception as e:
+            print(f"⚠️ خطا در بارگذاری Text: {e}")
+            self.text_model = None
+
+    def _load_embedding_model(self):
+        """بارگذاری مدل embedding"""
+        try:
+            self.embedding_model = SentenceTransformer(
+                'sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2',
+                device='cuda' if torch.cuda.is_available() else 'cpu'
+            )
+        except Exception as e:
+            print(f"⚠️ خطا در بارگذاری Embedding: {e}")
+            self.embedding_model = None
+
+    def _load_easyocr(self):
+        """بارگذاری EasyOCR"""
+        try:
+            # استفاده از CPU برای جلوگیری از مشکلات دستگاه
+            self.easy_ocr_reader = easyocr.Reader(
+                ['fa', 'en'],
+                gpu=torch.cuda.is_available()
+            )
+        except Exception as e:
+            print(f"⚠️ خطا در بارگذاری EasyOCR: {e}")
+            self.easy_ocr_reader = None
+
+    def setup_advanced_training_data(self):
+        """داده‌های آموزشی پیشرفته برای بهبود دقت"""
+        self.advanced_patterns = {
+            'title_phrases': [
+                'عنوان کتاب', 'نام کتاب', 'عنوان اصلی', 'Title', 'Book Title',
+                'عنوان اثر', 'نام اثر', 'Title of the Book'
+            ],
+            'author_phrases': [
+                'نویسنده', 'مؤلف', 'تألیف', 'نگارش', 'Author', 'Writer',
+                'نویسندگان', 'مؤلفین', 'By', 'Written by'
+            ],
+            'publisher_phrases': [
+                'ناشر', 'انتشارات', 'چاپ', 'Publisher', 'Publication',
+                'انتشار یافته توسط', 'منتشر شده توسط'
+            ],
+            'year_phrases': [
+                'سال چاپ', 'تاریخ چاپ', 'چاپ سال', 'Year', 'Publication Year',
+                'تاریخ انتشار', 'سال انتشار', 'زمستان', 'بهار', 'تابستان', 'پاییز'
+            ],
+            'edition_phrases': [
+                'نوبت چاپ', 'چاپ', 'Edition', 'Print', 'Version',
+                'ویرایش', 'نسخه'
+            ],
+            'isbn_phrases': [
+                'شابک', 'ISBN', 'International Standard Book Number',
+                'کد کتاب', 'شناسه کتاب'
+            ],
+            'translator_phrases': [
+                'مترجم', 'ترجمه', 'Translator', 'Translated by',
+                'ترجمه شده توسط', 'برگردان'
+            ]
+        }
+
+# ============================================================================
+# 🔍 بخش ۲: OCR با دقت فوق العاده - بهینه‌سازی پردازش
+# ============================================================================
+
+class UltraAccuracyOCREngine:
+    """موتور OCR با دقت فوق العاده"""
+
+    def __init__(self, ai_models, progress_callback=None):
+        self.ai_models = ai_models
+        self.progress_callback = progress_callback
+        self.setup_advanced_ocr()
+
+    def setup_advanced_ocr(self):
+        """تنظیمات پیشرفته OCR"""
+        # تنظیمات Tesseract برای دقت بالا
+        self.tesseract_configs = [
+            r'--oem 3 --psm 6 -c tessedit_char_whitelist=آابپتثجچحخدذرزژسشصضطظعغفقکگلمنوهیءةيك۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩ :.,-()',
+            r'--oem 3 --psm 4 -c preserve_interword_spaces=1',
+            r'--oem 3 --psm 8'
+        ]
+
+    def update_progress(self, value, message):
+        """به‌روزرسانی پیشرفت"""
+        if self.progress_callback:
+            self.progress_callback(value, message)
+
+    def extract_text_ultra_accurate(self, input_file) -> Tuple[str, Dict[str, Any]]:
+        """استخراج متن با دقت فوق العاده"""
+        self.update_progress(10, "🔍 شروع استخراج متن...")
+
+        results = {
+            'methods': {},
+            'confidence_scores': {},
+            'processing_times': {},
+            'quality_metrics': {}
+        }
+
+        try:
+            self.update_progress(20, "📖 پردازش موازی OCR...")
+
+            # پردازش موازی OCR
+            with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+                tesseract_future = executor.submit(self._advanced_tesseract_extraction, input_file)
+                easyocr_future = executor.submit(self._safe_easyocr_extraction, input_file)
+                
+                tesseract_results = tesseract_future.result()
+                easyocr_results = easyocr_future.result()
+
+            results['methods']['tesseract_advanced'] = tesseract_results
+            results['methods']['easyocr_precision'] = easyocr_results
+
+            self.update_progress(60, "🤖 ترکیب هوشمند نتایج...")
+
+            # ترکیب هوشمند نتایج
+            if easyocr_results['text']:
+                combined_text, fusion_metrics = self._intelligent_fusion(
+                    tesseract_results['text'],
+                    easyocr_results['text']
+                )
+            else:
+                combined_text = tesseract_results['text']
+                fusion_metrics = {'method': 'tesseract_only'}
+
+            results['combined_text'] = combined_text
+            results['fusion_metrics'] = fusion_metrics
+            results['quality_metrics'] = self._calculate_comprehensive_quality(combined_text)
+
+            self.update_progress(80, "✅ استخراج متن کامل شد")
+            print(f"✅ استخراج کامل - طول متن: {len(combined_text)} کاراکتر")
+            return combined_text, results
+
+        except Exception as e:
+            print(f"❌ خطا در استخراج متن: {e}")
+            # بازگشت به روش ساده در صورت خطا
+            try:
+                simple_text = self._simple_extraction(input_file)
+                return simple_text, results
+            except:
+                return "", results
+
+    def _advanced_tesseract_extraction(self, input_file) -> Dict[str, Any]:
+        """استخراج پیشرفته با Tesseract"""
+        start_time = datetime.now()
+
+        try:
+            if isinstance(input_file, str) and input_file.lower().endswith('.pdf'):
+                # پردازش 6 صفحه اول (کاهش از 8 صفحه)
+                images = convert_from_path(input_file, first_page=1, last_page=6, dpi=300)
+                all_texts = []
+
+                for i, image in enumerate(images):
+                    self.update_progress(25 + i*5, f"📄 پردازش صفحه {i+1} با Tesseract...")
+
+                    # پیش‌پردازش تصویر
+                    processed_image = self._preprocess_image(image)
+
+                    # اجرای چندین تنظیمات مختلف
+                    page_texts = []
+                    for config in self.tesseract_configs:
+                        try:
+                            text = pytesseract.image_to_string(
+                                processed_image,
+                                lang='fas+eng',
+                                config=config
+                            )
+                            if text.strip():
+                                page_texts.append(text)
+                        except Exception as e:
+                            continue
+
+                    # انتخاب بهترین متن برای هر صفحه
+                    if page_texts:
+                        best_page_text = max(page_texts, key=lambda x: len(x))
+                        all_texts.append(f"--- صفحه {i+1} ---\n{best_page_text}")
+
+                final_text = '\n'.join(all_texts)
+
+            else:
+                # پردازش فایل تصویری
+                if isinstance(input_file, str):
+                    image = Image.open(input_file)
+                else:
+                    image = input_file
+
+                processed_image = self._preprocess_image(image)
+                final_text = pytesseract.image_to_string(processed_image, lang='fas+eng')
+
+            processing_time = (datetime.now() - start_time).total_seconds()
+
+            return {
+                'text': final_text,
+                'confidence': 0.8,
+                'processing_time': processing_time,
+                'method': 'tesseract_advanced'
+            }
+
+        except Exception as e:
+            print(f"⚠️ خطا در Tesseract: {e}")
+            return {'text': '', 'confidence': 0, 'processing_time': 0, 'method': 'error'}
+
+    def _safe_easyocr_extraction(self, input_file) -> Dict[str, Any]:
+        """استخراج ایمن با EasyOCR"""
+        start_time = datetime.now()
+
+        if not self.ai_models.easy_ocr_reader:
+            return {'text': '', 'confidence': 0, 'processing_time': 0, 'method': 'not_available'}
+
+        try:
+            if isinstance(input_file, str) and input_file.lower().endswith('.pdf'):
+                # پردازش 6 صفحه اول (کاهش از 8 صفحه)
+                images = convert_from_path(input_file, first_page=1, last_page=6, dpi=300)
+                all_texts = []
+                confidences = []
+
+                for i, image in enumerate(images):
+                    self.update_progress(30 + i*5, f"📄 پردازش صفحه {i+1} با EasyOCR...")
+
+                    image_np = np.array(image)
+
+                    # تشخیص با پارامترهای دقیق
+                    results = self.ai_models.easy_ocr_reader.readtext(
+                        image_np,
+                        paragraph=True,
+                        min_size=10,
+                        text_threshold=0.4,
+                        low_text=0.3
+                    )
+
+                    page_text = ""
+                    for result in results:
+                        if len(result) >= 3:
+                            text = result[1]
+                            confidence = result[2]
+                        elif len(result) == 2:
+                            text = result[1]
+                            confidence = 0.7
+                        else:
+                            continue
+
+                        if confidence > 0.4:
+                            page_text += text + " "
+                            confidences.append(confidence)
+
+                    if page_text.strip():
+                        all_texts.append(f"--- صفحه {i+1} ---\n{page_text.strip()}")
+
+                final_text = '\n'.join(all_texts)
+                avg_confidence = np.mean(confidences) if confidences else 0
+
+            else:
+                if isinstance(input_file, str):
+                    image = Image.open(input_file)
+                    image_np = np.array(image)
+                else:
+                    image_np = np.array(input_file)
+
+                results = self.ai_models.easy_ocr_reader.readtext(
+                    image_np,
+                    paragraph=True,
+                    text_threshold=0.5
+                )
+
+                extracted_texts = []
+                confidences = []
+                for result in results:
+                    if len(result) >= 3:
+                        text = result[1]
+                        confidence = result[2]
+                    elif len(result) == 2:
+                        text = result[1]
+                        confidence = 0.7
+                    else:
+                        continue
+
+                    if confidence > 0.4:
+                        extracted_texts.append(text)
+                        confidences.append(confidence)
+
+                final_text = " ".join(extracted_texts)
+                avg_confidence = np.mean(confidences) if confidences else 0
+
+            processing_time = (datetime.now() - start_time).total_seconds()
+
+            return {
+                'text': final_text,
+                'confidence': avg_confidence,
+                'processing_time': processing_time,
+                'method': 'easyocr_safe'
+            }
+
+        except Exception as e:
+            print(f"⚠️ خطا در EasyOCR: {e}")
+            return {'text': '', 'confidence': 0, 'processing_time': 0, 'method': 'error'}
+
+    def _simple_extraction(self, input_file) -> str:
+        """استخراج ساده برای مواقع اضطراری"""
+        try:
+            if isinstance(input_file, str) and input_file.lower().endswith('.pdf'):
+                # پردازش 6 صفحه اول (کاهش از 8 صفحه)
+                images = convert_from_path(input_file, first_page=1, last_page=6, dpi=200)
+                texts = []
+                for image in images:
+                    text = pytesseract.image_to_string(image, lang='fas')
+                    if text.strip():
+                        texts.append(text)
+                return '\n'.join(texts)
+            else:
+                if isinstance(input_file, str):
+                    image = Image.open(input_file)
+                else:
+                    image = input_file
+                return pytesseract.image_to_string(image, lang='fas')
+        except:
+            return ""
+
+    def _preprocess_image(self, image):
+        """پیش‌پردازش ساده تصویر"""
+        try:
+            if image.mode != 'L':
+                image = image.convert('L')
+            enhancer = ImageEnhance.Contrast(image)
+            image = enhancer.enhance(1.3)
+            return image
+        except:
+            return image
+
+    def _intelligent_fusion(self, text1: str, text2: str) -> Tuple[str, Dict[str, float]]:
+        """ترکیب هوشمند متون"""
+        if not text1 and not text2:
+            return "", {'method': 'empty'}
+
+        if not text1:
+            return text2, {'method': 'easyocr_only'}
+
+        if not text2:
+            return text1, {'method': 'tesseract_only'}
+
+        lines1 = text1.split('\n')
+        lines2 = text2.split('\n')
+        fused_lines = []
+
+        max_lines = max(len(lines1), len(lines2))
+        for i in range(max_lines):
+            line1 = lines1[i] if i < len(lines1) else ""
+            line2 = lines2[i] if i < len(lines2) else ""
+
+            line1_clean = line1.strip()
+            line2_clean = line2.strip()
+
+            if not line1_clean and not line2_clean:
+                continue
+
+            if self._calculate_line_quality(line1_clean) >= self._calculate_line_quality(line2_clean):
+                fused_lines.append(line1_clean)
+            else:
+                fused_lines.append(line2_clean)
+
+        fused_text = '\n'.join(fused_lines)
+
+        return fused_text, {
+            'method': 'fusion',
+            'lines_combined': len(fused_lines),
+            'quality_score': self._calculate_text_quality(fused_text)
+        }
+
+    def _calculate_line_quality(self, line: str) -> float:
+        """محاسبه کیفیت خط"""
+        if not line.strip():
+            return 0.0
+
+        score = 0.0
+        if 5 <= len(line) <= 200:
+            score += 0.3
+
+        persian_chars = len(re.findall(r'[آ-ی]', line))
+        if persian_chars >= 2:
+            score += 0.4
+
+        words = line.split()
+        if 1 <= len(words) <= 20:
+            score += 0.3
+
+        return min(score, 1.0)
+
+    def _calculate_text_quality(self, text: str) -> float:
+        """محاسبه کیفیت کلی متن"""
+        lines = [line.strip() for line in text.split('\n') if line.strip()]
+        if not lines:
+            return 0.0
+
+        line_qualities = [self._calculate_line_quality(line) for line in lines]
+        return np.mean(line_qualities) if line_qualities else 0.0
+
+    def _calculate_comprehensive_quality(self, text: str) -> Dict[str, float]:
+        """محاسبه کیفیت جامع متن"""
+        quality_score = self._calculate_text_quality(text)
+        lines = [line.strip() for line in text.split('\n') if line.strip()]
+        persian_chars = len(re.findall(r'[آ-ی]', text))
+        total_chars = len(text)
+
+        return {
+            'overall_score': quality_score,
+            'line_count': len(lines),
+            'persian_ratio': persian_chars / total_chars if total_chars > 0 else 0,
+            'total_chars': total_chars
+        }
+
+# ============================================================================
+# 🤖 بخش ۳: سیستم RAG پیشرفته - با API Key شما و عمومی
+# ============================================================================
+
+class AdvancedRAGSystem:
+    """سیستم RAG پیشرفته برای استخراج و تحلیل متادیتا"""
+
+    def __init__(self):
+        # API Keyهای مختلف
+        self.api_keys = [
+            "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",  # API اصلی شما
+            "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",  # API عمومی 1
+            "sk-or-v1-9e5b5c5e5f5a5b5c5d5e5f5a5b5c5d5e5f5a5b5c5d5e5f5a5b5c5d5e5f5a5b5c"   # API عمومی 2
+        ]
+        self.current_api_index = 0
+        self.setup_llm()
+        self.knowledge_base = None
+
+    def setup_llm(self):
+        """تنظیم مدل زبانی با API Keyهای مختلف"""
+        for i in range(len(self.api_keys)):
+            try:
+                from llama_index.llms.openrouter import OpenRouter
+                from llama_index.embeddings.huggingface import HuggingFaceEmbedding
+
+                self.llm = OpenRouter(
+                    model="meta-llama/llama-3-70b-instruct",
+                    temperature=0.1,
+                    max_tokens=2000,
+                    context_window=8000,
+                    api_key=self.api_keys[i]
+                )
+
+                self.embed_model = HuggingFaceEmbedding(
+                    model_name="sentence-transformers/paraphrase-multilingual-mpnet-base-v2"
+                )
+
+                self.current_api_index = i
+                source = "شما" if i == 0 else f"عمومی {i}"
+                print(f"✅ مدل زبانی RAG با API Key {source} تنظیم شد")
+                return
+
+            except Exception as e:
+                print(f"❌ خطا در تنظیم مدل RAG با API Key {i+1}: {e}")
+                continue
+
+        # اگر همه APIها شکست خوردند
+        print("❌ همه APIها شکست خوردند - استفاده از روش‌های معمولی")
+        self.llm = None
+        self.embed_model = None
+
+    def switch_to_next_api(self):
+        """تعویض به API بعدی"""
+        self.current_api_index = (self.current_api_index + 1) % len(self.api_keys)
+        print(f"🔄 تعویض به API شماره {self.current_api_index + 1}")
+        self.setup_llm()
+
+    def create_knowledge_base(self, text: str):
+        """ایجاد پایگاه دانش از متن کتاب"""
+        if not self.llm:
+            print("❌ مدل زبانی در دسترس نیست - استفاده از روش‌های معمولی")
+            return False
+
+        try:
+            from llama_index.core import Document
+            from llama_index.core import VectorStoreIndex
+            from llama_index.core.node_parser import SentenceSplitter
+
+            document = Document(text=text)
+            parser = SentenceSplitter(chunk_size=512, chunk_overlap=64)
+            nodes = parser.get_nodes_from_documents([document])
+
+            self.knowledge_base = VectorStoreIndex(nodes, embed_model=self.embed_model)
+            print("✅ پایگاه دانش RAG ایجاد شد")
+            return True
+
+        except Exception as e:
+            print(f"❌ خطا در ایجاد پایگاه دانش: {e}")
+            return False
+
+# ============================================================================
+# 🚀 بخش ۴: استخراج‌کننده متادیتا با قدرت API
+# ============================================================================
+
+class APIEnhancedMetadataExtractor:
+    """استخراج کننده متادیتا با قدرت API"""
+    
+    def __init__(self, rag_system, progress_callback=None):
+        self.rag_system = rag_system
+        self.progress_callback = progress_callback
+        self.setup_extraction_prompts()
+    
+    def update_progress(self, value, message):
+        """به‌روزرسانی پیشرفت"""
+        if self.progress_callback:
+            self.progress_callback(value, message)
+    
+    def setup_extraction_prompts(self):
+        """تنظیم پرامپت‌های تخصصی استخراج با تمرکز بر بخش‌های حیاتی"""
+        self.extraction_prompts = {
+            'comprehensive': """
+            شما یک متخصص استخراج اطلاعات کتاب الکترونیکی هستید. لطفاً با دقت فوق‌العاده اطلاعات حیاتی زیر را از متن کتاب استخراج کنید:
+
+            متن کتاب:
+            {text}
+            
+            بخش‌های حیاتی برای استخراج:
+
+            1. عنوان کتاب (ضروری)
+               - عنوان اصلی (ضروری)
+               - عنوان فرعی (در صورت وجود)
+
+            2. نام نویسنده/نویسندگان (ضروری)
+               - نام کامل نویسنده اصلی
+               - نویسندگان همکار (در صورت وجود)
+
+            3. مترجم (ضروری برای کتاب‌های ترجمه)
+
+            4. ناشر و سال انتشار (ضروری)
+               - نام رسمی ناشر
+               - سال انتشار به عدد فارسی (مثلاً: ۱۳۹۷، ۱۴۰۰)
+
+            5. شابک (ISBN یا eISBN) (بسیار مهم)
+
+            6. نوبت چاپ
+
+            قوانین استخراج دقیق:
+            - برای سال انتشار، به دنبال الگوهای زیر باشید:
+              * "سال انتشار: ۱۳۹۷"
+              * "چاپ: ۱۳۹۸" 
+              * "زمستان ۱۳۹۷"
+              * "۱۳۹۷"
+            - اگر سال به صورت فصلی ذکر شده، فقط عدد سال را استخراج کنید
+            - اعداد را به صورت فارسی برگردانید
+            - مطمئن شوید سال انتشار ۴ رقمی است
+            - برای نویسنده و ناشر، کلمات را با فاصله صحیح بنویسید
+
+            فرمت خروجی JSON:
+            {{
+                "title": "عنوان اصلی کتاب",
+                "author": "نام نویسنده اصلی",
+                "translator": "نام مترجم",
+                "publisher": "نام ناشر",
+                "publication_year": "سال انتشار",
+                "isbn": "شابک کتاب",
+                "edition": "نوبت چاپ"
+            }}
+
+            پاسخ را فقط به صورت JSON برگردانید:
+            """
+        }
+    
+    def extract_with_api_power(self, text: str) -> Dict[str, Any]:
+        """استخراج متادیتا با قدرت API"""
+        self.update_progress(70, "🧠 استخراج اطلاعات با قدرت API...")
+        
+        if not self.rag_system.llm:
+            print("❌ API در دسترس نیست - استفاده از روش‌های معمولی")
+            return self._extract_without_api(text)
+        
+        max_retries = len(self.rag_system.api_keys)
+        
+        for retry in range(max_retries):
+            try:
+                # مرحله 1: استخراج جامع با API
+                chunk = text[:3000]
+                prompt = self.extraction_prompts['comprehensive'].format(text=chunk)
+                
+                initial_metadata = self._call_api_for_extraction(prompt)
+                
+                if initial_metadata and any(initial_metadata.values()):
+                    # پس‌پردازش و تصحیح
+                    final_metadata = self._post_process_metadata(initial_metadata, text)
+                    
+                    self.update_progress(85, "✅ استخراج با API تکمیل شد")
+                    print("✅ استخراج با API تکمیل شد")
+                    return final_metadata
+                else:
+                    print(f"⚠️ API شماره {retry + 1} نتیجه‌ای برنگرداند")
+                    if retry < max_retries - 1:
+                        self.rag_system.switch_to_next_api()
+                    
+            except Exception as e:
+                print(f"❌ خطا در استخراج با API شماره {retry + 1}: {e}")
+                if retry < max_retries - 1:
+                    self.rag_system.switch_to_next_api()
+                continue
+        
+        print("❌ همه APIها شکست خوردند - استفاده از روش‌های معمولی")
+        return self._extract_without_api(text)
+    
+    def _extract_without_api(self, text: str) -> Dict[str, Any]:
+        """استخراج بدون API - استفاده از روش‌های محلی"""
+        self.update_progress(70, "🔍 استخراج اطلاعات با روش‌های محلی...")
+        
+        metadata = {}
+        
+        # استخراج عنوان از خطوط اول
+        title = self._extract_title_from_first_lines(text)
+        if title:
+            metadata['title'] = title
+            print(f"✅ عنوان استخراج شد: {title}")
+        
+        # استخراج سایر اطلاعات با الگوهای منظم
+        metadata.update(self._extract_with_patterns(text))
+        
+        return metadata
+    
+    def _extract_title_from_first_lines(self, text: str) -> str:
+        """استخراج عنوان از خطوط اول متن"""
+        lines = [line.strip() for line in text.split('\n') if line.strip()]
+        
+        # بررسی 10 خط اول
+        for i, line in enumerate(lines[:10]):
+            if (10 <= len(line) <= 150 and
+                len(re.findall(r'[آ-ی]', line)) >= 2 and
+                not any(word in line for word in ['نویسنده', 'مؤلف', 'ناشر', 'چاپ', 'شابک', 'مترجم', 'فهرست', 'مقدمه'])):
+                return line
+        
+        return ""
+    
+    def _extract_with_patterns(self, text: str) -> Dict[str, Any]:
+        """استخراج اطلاعات با الگوهای منظم"""
+        patterns = {
+            'author': [
+                r'نویسنده\s*[:\-]\s*([^\n]+)',
+                r'مؤلف\s*[:\-]\s*([^\n]+)',
+                r'تألیف\s*[:\-]\s*([^\n]+)'
+            ],
+            'publisher': [
+                r'ناشر\s*[:\-]\s*([^\n]+)',
+                r'انتشارات\s*[:\-]\s*([^\n]+)'
+            ],
+            'publication_year': [
+                r'سال\s*انتشار\s*[:\-]\s*([۱۳۴۰-۹]{4})',
+                r'چاپ\s*[:\-]\s*.*?([۱۳۴۰-۹]{4})',
+                r'تاریخ\s*انتشار\s*[:\-]\s*([۱۳۴۰-۹]{4})'
+            ],
+            'isbn': [
+                r'شابک\s*[:\-]\s*([۰-۹\-–]+)',
+                r'ISBN\s*[:\-]\s*([۰-۹\-–]+)'
+            ],
+            'edition': [
+                r'چاپ\s*(\d+)',
+                r'نوبت چاپ\s*[:\-]\s*(\d+)',
+                r'چاپ\s*(اول|دوم|سوم|چهارم|پنجم|ششم|هفتم|هشتم|نهم|دهم)'
+            ],
+            'translator': [
+                r'مترجم\s*[:\-]\s*([^\n]+)',
+                r'ترجمه\s*[:\-]\s*([^\n]+)',
+                r'برگردان\s*[:\-]\s*([^\n]+)'
+            ]
+        }
+        
+        results = {}
+        for field, pattern_list in patterns.items():
+            for pattern in pattern_list:
+                match = re.search(pattern, text, re.IGNORECASE)
+                if match:
+                    results[field] = match.group(1).strip()
+                    break
+        
+        return results
+    
+    def _call_api_for_extraction(self, prompt: str) -> Dict[str, Any]:
+        """فراخوانی API برای استخراج"""
+        try:
+            from llama_index.core import Document
+            doc = Document(text=prompt)
+            
+            query_engine = self.rag_system.knowledge_base.as_query_engine(
+                llm=self.rag_system.llm,
+                similarity_top_k=3,
+                response_mode="compact"
+            )
+            
+            response = query_engine.query(prompt)
+            response_text = str(response).strip()
+            
+            return self._extract_json_from_response(response_text)
+            
+        except Exception as e:
+            print(f"⚠️ خطا در فراخوانی API: {e}")
+            return {}
+    
+    def _extract_json_from_response(self, response: str) -> Dict[str, Any]:
+        """استخراج JSON از پاسخ API"""
+        try:
+            json_patterns = [
+                r'\{[^{}]*\}',
+                r'```json\s*(\{.*?\})\s*```',
+                r'```\s*(\{.*?\})\s*```'
+            ]
+            
+            for pattern in json_patterns:
+                matches = re.findall(pattern, response, re.DOTALL)
+                for match in matches:
+                    try:
+                        if isinstance(match, tuple):
+                            match = match[0]
+                        return json.loads(match)
+                    except:
+                        continue
+            
+            lines = response.split('\n')
+            json_like = {}
+            
+            for line in lines:
+                line = line.strip()
+                if ':' in line and not line.startswith('{') and not line.startswith('}'):
+                    parts = line.split(':', 1)
+                    if len(parts) == 2:
+                        key, value = parts
+                        key = key.strip().strip('"\'')
+                        value = value.strip().strip('",\'')
+                        if key and value:
+                            json_like[key] = value
+            
+            return json_like if json_like else {}
+            
+        except Exception as e:
+            print(f"⚠️ خطا در استخراج JSON: {e}")
+            return {}
+
+    def _post_process_metadata(self, metadata: Dict[str, Any], text: str) -> Dict[str, Any]:
+        """پس‌پردازش و تصحیح متادیتا"""
+        processed = metadata.copy()
+        
+        # اگر عنوان پیدا نشده، از روش جایگزین استفاده کن
+        if not processed.get('title'):
+            title = self._extract_title_from_first_lines(text)
+            if title:
+                processed['title'] = title
+                print(f"✅ عنوان اضافه شد: {title}")
+        
+        return processed
+
+# ============================================================================
+# 📝 بخش ۵: استخراج‌کننده ساده (پشتیبان)
+# ============================================================================
+
+class SimpleBookExtractor:
+    """استخراج ساده اطلاعات کتاب"""
+
+    def extract_basic_info(self, text: str) -> Dict[str, Any]:
+        """استخراج اطلاعات پایه"""
+        results = {}
+        lines = text.split('\n')
+
+        # استخراج عنوان از خطوط اول
+        title = self._extract_title_from_first_lines(lines)
+        if title:
+            results['title'] = title
+
+        for i, line in enumerate(lines):
+            line = line.strip()
+            if not line:
+                continue
+
+            year = self._extract_year(line)
+            if year and 'year' not in results:
+                results['year'] = year
+
+            edition = self._extract_edition(line)
+            if edition and 'edition' not in results:
+                results['edition'] = edition
+
+            author = self._extract_author(line)
+            if author and 'author' not in results:
+                results['author'] = author
+
+            translator = self._extract_translator(line)
+            if translator and 'translator' not in results:
+                results['translator'] = translator
+
+        return results
+
+    def _extract_title_from_first_lines(self, all_lines: List[str]) -> str:
+        """استخراج عنوان از خطوط اول"""
+        # بررسی 10 خط اول
+        first_lines = [line.strip() for line in all_lines[:10] if line.strip()]
+        
+        for line in first_lines:
+            if (10 <= len(line) <= 150 and
+                len(re.findall(r'[آ-ی]', line)) >= 2 and
+                not any(word in line for word in ['نویسنده', 'مؤلف', 'ناشر', 'چاپ', 'شابک', 'مترجم', 'فهرست'])):
+                return line
+        
+        return ""
+
+    def _extract_year(self, line: str) -> str:
+        """استخراج سال"""
+        year_patterns = [
+            r'۱۳[۷-۹][۰-۹]',
+            r'۱۴۰[۰-۴]',
+            r'سال\s*انتشار\s*[:\-]\s*([۱۳۴۰-۹]{4})',
+            r'چاپ\s*[:\-]\s*.*?([۱۳۴۰-۹]{4})'
+        ]
+        for pattern in year_patterns:
+            match = re.search(pattern, line)
+            if match:
+                year = match.group(1) if match.groups() else match.group()
+                if self._is_valid_year(year):
+                    return year
+        return ""
+
+    def _extract_edition(self, line: str) -> str:
+        """استخراج نوبت چاپ"""
+        edition_patterns = [
+            r'چاپ\s*(\d+)',
+            r'نوبت چاپ\s*[:\-]\s*(\d+)',
+            r'چاپ\s*(اول|دوم|سوم|چهارم|پنجم|ششم|هفتم|هشتم|نهم|دهم)',
+        ]
+        for pattern in edition_patterns:
+            match = re.search(pattern, line, re.IGNORECASE)
+            if match:
+                return match.group(1) if match.groups() else match.group(0)
+        return ""
+
+    def _extract_author(self, line: str) -> str:
+        """استخراج نویسنده"""
+        author_patterns = [
+            r'نویسنده\s*[:\-]\s*(.+)',
+            r'مؤلف\s*[:\-]\s*(.+)',
+            r'تألیف\s*[:\-]\s*(.+)',
+        ]
+        for pattern in author_patterns:
+            match = re.search(pattern, line, re.IGNORECASE)
+            if match:
+                author = match.group(1).strip()
+                if self._is_valid_author(author):
+                    return author
+        return ""
+
+    def _extract_translator(self, line: str) -> str:
+        """استخراج مترجم"""
+        translator_patterns = [
+            r'مترجم\s*[:\-]\s*(.+)',
+            r'ترجمه\s*[:\-]\s*(.+)',
+            r'برگردان\s*[:\-]\s*(.+)',
+        ]
+        for pattern in translator_patterns:
+            match = re.search(pattern, line, re.IGNORECASE)
+            if match:
+                translator = match.group(1).strip()
+                if self._is_valid_translator(translator):
+                    return translator
+        return ""
+
+    def _is_valid_author(self, text: str) -> bool:
+        """اعتبارسنجی نویسنده"""
+        return (3 <= len(text) <= 80 and
+                len(re.findall(r'[آ-ی]', text)) >= 1)
+
+    def _is_valid_translator(self, text: str) -> bool:
+        """اعتبارسنجی مترجم"""
+        return (3 <= len(text) <= 80 and
+                len(re.findall(r'[آ-ی]', text)) >= 1)
+
+    def _is_valid_year(self, year: str) -> bool:
+        """اعتبارسنجی سال"""
+        if not year or len(year) != 4:
+            return False
+        return year.startswith(('۱۳', '۱۴'))
+
+    def extract_additional_info(self, text: str) -> Dict[str, Any]:
+        """استخراج اطلاعات تکمیلی"""
+        results = {}
+
+        patterns = {
+            'publisher': r'ناشر\s*[:\-]\s*(.+)',
+            'isbn': r'شابک\s*[:\-]\s*([۰-۹\-–]+)',
+            'price': r'قیمت\s*[:\-]\s*([۰-۹,]+)\s*تومان',
+            'translator': r'مترجم\s*[:\-]\s*(.+)',
+            'subject': r'موضوع\s*[:\-]\s*(.+)'
+        }
+
+        for field, pattern in patterns.items():
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                results[field] = match.group(1).strip()
+
+        return results
+
+# ============================================================================
+# 🔄 بخش ۶: پردازشگر اصلی با قدرت API
+# ============================================================================
+
+class UltraAccuracyBookProcessor:
+    """پردازشگر اصلی با قدرت API"""
+    
+    def __init__(self, progress_callback=None):
+        self.progress_callback = progress_callback
+        self.ai_models = HighAccuracyAIModels()
+        self.rag_system = AdvancedRAGSystem()
+    
+    def update_progress(self, value, message):
+        """به‌روزرسانی پیشرفت"""
+        if self.progress_callback:
+            self.progress_callback(value, message)
+    
+    def process_book_ultra_accurate(self, input_file) -> Dict[str, Any]:
+        """پردازش کتاب با قدرت API"""
+        self.update_progress(5, "🚀 شروع پردازش کتاب...")
+        
+        start_time = datetime.now()
+        
+        # ایجاد OCR Engine با callback
+        ocr_engine = UltraAccuracyOCREngine(self.ai_models, self.update_progress)
+        
+        # استخراج متن
+        raw_text, ocr_results = ocr_engine.extract_text_ultra_accurate(input_file)
+        
+        if not raw_text or len(raw_text.strip()) < 10:
+            return self._create_error_result("متن کافی استخراج نشد", ocr_results, start_time)
+        
+        print(f"📖 متن استخراج شده: {len(raw_text)} کاراکتر")
+        
+        # ایجاد API Extractor با callback
+        api_extractor = APIEnhancedMetadataExtractor(self.rag_system, self.update_progress)
+        
+        # ایجاد پایگاه دانش برای API
+        rag_ready = self.rag_system.create_knowledge_base(raw_text)
+        
+        if rag_ready:
+            # استخراج اصلی با قدرت API
+            api_metadata = api_extractor.extract_with_api_power(raw_text)
+            
+            # استخراج پشتیبان با روش‌های معمولی
+            self.update_progress(90, "🔍 استخراج اطلاعات تکمیلی...")
+            backup_metadata = self._extract_backup_metadata(raw_text)
+            
+            # ترکیب نهایی با اولویت API
+            final_metadata = self._final_fusion(api_metadata, backup_metadata, raw_text)
+        else:
+            # فقط روش‌های معمولی
+            print("⚠️ استفاده از روش‌های معمولی")
+            final_metadata = self._extract_backup_metadata(raw_text)
+        
+        # ایجاد نتایج نهایی
+        results = self._create_final_results(final_metadata, raw_text, ocr_results, 
+                                           rag_ready, start_time, input_file)
+        
+        self.update_progress(100, "✅ پردازش کامل شد!")
+        return results
+    
+    def _extract_backup_metadata(self, text: str) -> Dict[str, Any]:
+        """استخراج پشتیبان با روش‌های معمولی"""
+        simple_extractor = SimpleBookExtractor()
+        basic = simple_extractor.extract_basic_info(text)
+        additional = simple_extractor.extract_additional_info(text)
+        
+        return {
+            'basic_info': basic,
+            'additional_info': additional
+        }
+    
+    def _final_fusion(self, api_metadata: Dict, backup_metadata: Dict, text: str) -> Dict[str, Any]:
+        """ترکیب نهایی با اولویت API"""
+        final = {
+            'basic_info': backup_metadata.get('basic_info', {}).copy(),
+            'additional_info': backup_metadata.get('additional_info', {}).copy(),
+            'api_enhanced': bool(api_metadata and len(api_metadata) > 0)
+        }
+        
+        # بخش‌های حیاتی که حتماً باید از API استفاده کنند
+        critical_fields = ['title', 'author', 'translator', 'publisher', 'publication_year', 'isbn', 'edition']
+        
+        if api_metadata:
+            for field in critical_fields:
+                if api_metadata.get(field):
+                    final['basic_info'][field] = api_metadata[field]
+                    print(f"✅ API تعیین کرد ({field}): {api_metadata[field]}")
+        
+        return final
+    
+    def _create_final_results(self, metadata: Dict, text: str, ocr_results: Dict,
+                            rag_ready: bool, start_time: datetime, input_file) -> Dict[str, Any]:
+        """ایجاد ساختار نهایی نتایج"""
+        
+        return {
+            'basic_info': metadata.get('basic_info', {}),
+            'additional_info': metadata.get('additional_info', {}),
+            'file_info': self._get_file_info(input_file),
+            'processing_time': (datetime.now() - start_time).total_seconds(),
+            'ocr_analysis': ocr_results,
+            'rag_available': rag_ready,
+            'api_enhanced': metadata.get('api_enhanced', False),
+            'text_sample': text[:500] + "..." if len(text) > 500 else text,
+            'processing_date': datetime.now().isoformat(),
+            'total_text_length': len(text)
+        }
+    
+    def _create_error_result(self, error: str, ocr_results: Dict, start_time: datetime):
+        """ایجاد نتیجه خطا"""
+        return {
+            'error': error,
+            'processing_time': (datetime.now() - start_time).total_seconds(),
+            'ocr_analysis': ocr_results
+        }
+    
+    def _get_file_info(self, input_file) -> Dict[str, Any]:
+        """اطلاعات فایل"""
+        if isinstance(input_file, str):
+            return {
+                'file_name': os.path.basename(input_file),
+                'file_type': 'PDF' if input_file.lower().endswith('.pdf') else 'Image'
+            }
+        else:
+            return {
+                'file_name': 'uploaded_file',
+                'file_type': 'Image'
+            }
+
+print("✅ تمام کلاس‌های اصلی تعریف شدند")
+
+# ============================================================================
+# 🎨 بخش ۷: رابط Gradio با طراحی مشکی و سبز
+# ============================================================================
+
+class GradioInterface:
+    """رابط کاربری Gradio با طراحی مشکی و سبز"""
+    
+    def __init__(self):
+        self.current_progress = 0
+        self.current_message = "آماده برای پردازش..."
+        self.processing = False
+        
+    def process_file(self, file):
+        """پردازش فایل آپلود شده"""
+        if file is None:
+            return self._create_empty_result(), None, None, self._create_progress_html()
+        
+        try:
+            self.processing = True
+            self.current_progress = 0
+            self.current_message = "🚀 شروع پردازش..."
+            
+            # ذخیره فایل آپلود شده
+            file_path = file.name
+            
+            # ایجاد پردازشگر با callback
+            processor = UltraAccuracyBookProcessor(self._update_progress_callback)
+            
+            # پردازش فایل
+            results = processor.process_book_ultra_accurate(file_path)
+            
+            # ذخیره نتایج
+            json_file, txt_file = self._save_results(results, file_path)
+            
+            # ایجاد نمایش زیبا
+            display_html = self._create_display_html(results)
+            
+            self.processing = False
+            return display_html, json_file, txt_file, self._create_progress_html()
+            
+        except Exception as e:
+            self.processing = False
+            error_html = self._create_error_html(str(e))
+            return error_html, None, None, self._create_progress_html()
+    
+    def _update_progress_callback(self, value, message):
+        """به‌روزرسانی پیشرفت"""
+        self.current_progress = value
+        self.current_message = message
+    
+    def _create_progress_html(self):
+        """ایجاد HTML برای نمایش پیشرفت"""
+        return f"""
+        <div style="background: #1a1a1a; color: #00ff00; padding: 20px; border-radius: 10px; border: 2px solid #00ff00; text-align: center; margin-bottom: 20px;">
+            <h4 style="margin-top: 0; color: #00ff00;">📊 وضعیت پردازش</h4>
+            <div style="background: #333; height: 20px; border-radius: 10px; margin: 10px 0; overflow: hidden;">
+                <div style="background: linear-gradient(90deg, #00ff00, #00cc00); height: 100%; width: {self.current_progress}%; transition: width 0.3s;"></div>
+            </div>
+            <div style="color: #00ff00; font-size: 14px; font-family: 'Courier New', monospace;">{self.current_message}</div>
+            <div style="color: #00ff00; font-weight: bold; margin-top: 5px; font-family: 'Courier New', monospace;">{self.current_progress}%</div>
+        </div>
+        """
+    
+    def _create_display_html(self, results):
+        """ایجاد HTML برای نمایش نتایج"""
+        if 'error' in results:
+            return self._create_error_html(results['error'])
+        
+        basic_info = results.get('basic_info', {})
+        additional_info = results.get('additional_info', {})
+        
+        # ایجاد HTML برای اطلاعات اصلی
+        basic_html = ""
+        fields = [
+            ('title', '📚 عنوان کتاب', 'عنوانی یافت نشد'),
+            ('author', '✍️ نویسنده/مؤلف', 'نویسنده ای یافت نشد'),
+            ('translator', '🌐 مترجم', 'مترجمی یافت نشد'),
+            ('publisher', '🏢 ناشر', 'ناشری یافت نشد'),
+            ('publication_year', '📅 سال انتشار', 'سال انتشار یافت نشد'),
+            ('isbn', '🔖 شابک (ISBN)', 'شابکی یافت نشد'),
+            ('edition', '🔄 نوبت چاپ', 'نوبت چاپی یافت نشد')
+        ]
+        
+        for field, display, not_found in fields:
+            value = basic_info.get(field, not_found)
+            if value != not_found:
+                basic_html += f"""
+                <div style="background: #2a2a2a; color: #00ff00; padding: 15px; margin: 8px 0; border-radius: 8px; border-left: 4px solid #00ff00; border-right: 1px solid #00ff00;">
+                    <strong style="color: #00ff00; font-family: 'Courier New', monospace;">{display}:</strong>
+                    <span style="color: #ffffff; font-family: 'Courier New', monospace;"> {value}</span>
+                </div>
+                """
+            else:
+                basic_html += f"""
+                <div style="background: #1a1a1a; color: #666; padding: 15px; margin: 8px 0; border-radius: 8px; border-left: 4px solid #666; border-right: 1px solid #666;">
+                    <strong style="color: #666; font-family: 'Courier New', monospace;">{display}:</strong>
+                    <span style="color: #666; font-family: 'Courier New', monospace;"> {not_found}</span>
+                </div>
+                """
+        
+        # ایجاد HTML برای اطلاعات تکمیلی
+        additional_html = ""
+        if additional_info:
+            for key, value in additional_info.items():
+                if value:
+                    additional_html += f"""
+                    <div style="background: #2a2a2a; color: #00ff00; padding: 10px; margin: 5px 0; border-radius: 5px; border: 1px solid #00ff00;">
+                        <strong style="color: #00ff00; font-family: 'Courier New', monospace;">{key}:</strong>
+                        <span style="color: #ffffff; font-family: 'Courier New', monospace;"> {value}</span>
+                    </div>
+                    """
+        
+        # اطلاعات فنی
+        tech_info = f"""
+        <div style="background: #1a1a1a; color: #00ff00; padding: 15px; border-radius: 8px; margin-top: 20px; border: 2px solid #00ff00;">
+            <h4 style="margin-top: 0; color: #00ff00; font-family: 'Courier New', monospace;">🔧 اطلاعات فنی پردازش</h4>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; font-family: 'Courier New', monospace;">
+                <div style="color: #00ff00;">⏱️ زمان پردازش: <strong style="color: #ffffff;">{results.get('processing_time', 0):.2f} ثانیه</strong></div>
+                <div style="color: #00ff00;">📊 طول متن: <strong style="color: #ffffff;">{results.get('total_text_length', 0)} کاراکتر</strong></div>
+                <div style="color: #00ff00;">🤖 قدرت API: <strong style="color: #ffffff;">{'فعال ✅' if results.get('api_enhanced') else 'غیرفعال ⚠️'}</strong></div>
+                <div style="color: #00ff00;">🧠 سیستم RAG: <strong style="color: #ffffff;">{'آماده ✅' if results.get('rag_available') else 'غیرفعال ⚠️'}</strong></div>
+            </div>
+        </div>
+        """
+        
+        return f"""
+        <div style="font-family: 'Courier New', monospace; background: #000000; color: #00ff00;">
+            <div style="background: linear-gradient(135deg, #001a00 0%, #003300 100%); color: #00ff00; padding: 20px; border-radius: 10px 10px 0 0; border: 2px solid #00ff00;">
+                <h2 style="margin: 0; text-align: center; color: #00ff00; font-family: 'Courier New', monospace;">🎯 نتایج استخراج اطلاعات کتاب</h2>
+            </div>
+            
+            <div style="padding: 20px; background: #000000; border-radius: 0 0 10px 10px; border: 2px solid #00ff00; border-top: none;">
+                <h3 style="color: #00ff00; border-bottom: 2px solid #00ff00; padding-bottom: 10px; font-family: 'Courier New', monospace;">📚 اطلاعات اصلی کتاب</h3>
+                {basic_html}
+                
+                {f'<h3 style="color: #00ff00; border-bottom: 2px solid #00ff00; padding-bottom: 10px; margin-top: 20px; font-family: Courier New, monospace;">📋 اطلاعات تکمیلی</h3>{additional_html}' if additional_html else ''}
+                
+                {tech_info}
+                
+                <div style="margin-top: 20px; padding: 15px; background: #001a00; border-radius: 8px; border: 2px solid #00ff00;">
+                    <h4 style="margin-top: 0; color: #00ff00; font-family: Courier New, monospace;">✅ پردازش با موفقیت انجام شد</h4>
+                    <p style="margin: 0; color: #00ff00; font-family: Courier New, monospace;">نتایج در فایل‌های JSON و TXT ذخیره شده‌اند.</p>
+                </div>
+            </div>
+        </div>
+        """
+    
+    def _create_error_html(self, error_message):
+        """ایجاد HTML برای نمایش خطا"""
+        return f"""
+        <div style="background: #1a0000; color: #ff0000; padding: 20px; border-radius: 10px; border: 2px solid #ff0000; font-family: 'Courier New', monospace;">
+            <h3 style="margin-top: 0; color: #ff0000;">❌ خطا در پردازش</h3>
+            <p style="color: #ff0000;">خطای زیر رخ داده است:</p>
+            <pre style="background: #000000; color: #ff0000; padding: 10px; border-radius: 5px; border: 1px solid #ff0000;">{error_message}</pre>
+        </div>
+        """
+    
+    def _save_results(self, results, file_path):
+        """ذخیره نتایج در فایل"""
+        try:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            base_name = os.path.splitext(os.path.basename(file_path))[0]
+            
+            # ذخیره JSON
+            json_filename = f"{base_name}_نتایج_{timestamp}.json"
+            with open(json_filename, 'w', encoding='utf-8') as f:
+                json.dump(results, f, ensure_ascii=False, indent=2)
+            
+            # ذخیره گزارش متنی
+            txt_filename = f"{base_name}_گزارش_{timestamp}.txt"
+            report_content = self._create_text_report(results)
+            with open(txt_filename, 'w', encoding='utf-8') as f:
+                f.write(report_content)
+            
+            return json_filename, txt_filename
+            
+        except Exception as e:
+            print(f"خطا در ذخیره فایل‌ها: {e}")
+            return None, None
+    
+    def _create_text_report(self, results):
+        """ایجاد گزارش متنی"""
+        basic_info = results.get('basic_info', {})
+        
+        report = f"""📊 گزارش کامل تحلیل کتاب
+{'='*50}
+
+📚 اطلاعات شناسنامه کتاب:
+{'-'*30}
+"""
+        
+        fields = [
+            ('title', 'عنوان کتاب'),
+            ('author', 'نویسنده/مؤلف'),
+            ('translator', 'مترجم'),
+            ('publisher', 'ناشر'),
+            ('publication_year', 'سال انتشار'),
+            ('isbn', 'شابک (ISBN)'),
+            ('edition', 'نوبت چاپ')
+        ]
+        
+        for field, title in fields:
+            value = basic_info.get(field, "یافت نشد")
+            report += f"- {title}: {value}\n"
+        
+        report += f"""
+🔧 اطلاعات فنی پردازش:
+{'-'*30}
+- زمان پردازش: {results.get('processing_time', 0):.2f} ثانیه
+- طول متن استخراج شده: {results.get('total_text_length', 0)} کاراکتر
+- سیستم API: {'فعال' if results.get('api_enhanced') else 'غیرفعال'}
+- سیستم RAG: {'فعال' if results.get('rag_available') else 'غیرفعال'}
+
+🕒 تاریخ پردازش: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+"""
+        
+        return report
+    
+    def _create_empty_result(self):
+        """ایجاد نتیجه خالی"""
+        return """
+        <div style="background: #000000; color: #00ff00; padding: 40px; text-align: center; border-radius: 10px; border: 2px dashed #00ff00; font-family: 'Courier New', monospace;">
+            <h3 style="margin-top: 0; color: #00ff00;">📚 سیستم استخراج اطلاعات کتاب</h3>
+            <p style="color: #00ff00;">لطفاً یک فایل PDF یا تصویر آپلود کنید تا پردازش شروع شود.</p>
+        </div>
+        """
+
+# ============================================================================
+# 🚀 اجرای برنامه با رابط Gradio
+# ============================================================================
+
+def create_gradio_interface():
+    """ایجاد رابط Gradio با طراحی مشکی و سبز"""
+    interface = GradioInterface()
+    
+    # CSS سفارشی برای طراحی مشکی و سبز
+    custom_css = """
+    .gradio-container {
+        background: #000000 !important;
+        color: #00ff00 !important;
+    }
+    .gradio-container .panel {
+        background: #000000 !important;
+        border: 2px solid #00ff00 !important;
+    }
+    .gradio-container .button {
+        background: #001a00 !important;
+        color: #00ff00 !important;
+        border: 2px solid #00ff00 !important;
+    }
+    .gradio-container .button:hover {
+        background: #003300 !important;
+    }
+    .gradio-container .input {
+        background: #000000 !important;
+        color: #00ff00 !important;
+        border: 2px solid #00ff00 !important;
+    }
+    .gradio-container .output {
+        background: #000000 !important;
+        color: #00ff00 !important;
+        border: 2px solid #00ff00 !important;
+    }
+    """
+    
+    with gr.Blocks(
+        title="سیستم استخراج اطلاعات کتاب - طراحی ماتریکس",
+        css=custom_css,
+        theme=gr.themes.Default(
+            primary_hue="green",
+            neutral_hue="slate"
+        )
+    ) as demo:
+        gr.Markdown("""
+        <div style="background: #000000; color: #00ff00; padding: 20px; border-radius: 10px; border: 2px solid #00ff00; font-family: 'Courier New', monospace;">
+            <h1 style="text-align: center; margin: 0;">📚 سیستم استخراج اطلاعات کتاب با قدرت API</h1>
+            <h2 style="text-align: center; margin: 10px 0; color: #00ff00;">⚡ نسخه ماتریکس - طراحی مشکی و سبز</h2>
+        </div>
+        
+        <div style="background: #001a00; color: #00ff00; padding: 15px; border-radius: 8px; margin: 20px 0; border: 2px solid #00ff00; font-family: 'Courier New', monospace;">
+            <h3 style="margin-top: 0; color: #00ff00;">🎯 ویژگی‌های سیستم:</h3>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                <div>🤖 OCR سریع و دقیق</div>
+                <div>🎯 شناسایی هوشمند عنوان</div>
+                <div>🧠 سیستم RAG پیشرفته</div>
+                <div>🔗 استخراج با قدرت API</div>
+                <div>⚡ پردازش موازی</div>
+                <div>💾 ذخیره خودکار نتایج</div>
+            </div>
+        </div>
+        """)
+        
+        with gr.Row():
+            with gr.Column(scale=1):
+                file_input = gr.File(
+                    label="📁 آپلود فایل کتاب",
+                    file_types=[".pdf", ".jpg", ".jpeg", ".png"],
+                    type="filepath"
+                )
+                
+                process_btn = gr.Button(
+                    "🚀 شروع پردازش",
+                    variant="primary",
+                    size="lg"
+                )
+                
+                progress_display = gr.HTML(
+                    label="📊 وضعیت پردازش",
+                    value=interface._create_progress_html()
+                )
+                
+            with gr.Column(scale=2):
+                results_display = gr.HTML(
+                    label="🎯 نتایج استخراج",
+                    value=interface._create_empty_result()
+                )
+                
+                with gr.Row():
+                    json_output = gr.File(
+                        label="💾 فایل JSON",
+                        file_types=[".json"],
+                        interactive=False,
+                        visible=False
+                    )
+                    
+                    txt_output = gr.File(
+                        label="📝 فایل گزارش",
+                        file_types=[".txt"],
+                        interactive=False,
+                        visible=False
+                    )
+        
+        # مدیریت رویدادها
+        process_btn.click(
+            fn=interface.process_file,
+            inputs=[file_input],
+            outputs=[results_display, json_output, txt_output, progress_display]
+        )
+    
+    return demo
+
+# ============================================================================
+# 🚀 اجرای برنامه اصلی
+# ============================================================================
+
+if __name__ == "__main__":
+    print("🚀 در حال راه‌اندازی رابط Gradio با طراحی ماتریکس...")
+    
+    # ایجاد و اجرای رابط
+    demo = create_gradio_interface()
+    
+    # اجرای دمو
+    demo.launch(
+        share=True,
+        debug=True,
+        show_error=True
+    )
