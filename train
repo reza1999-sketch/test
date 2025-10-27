@@ -1,0 +1,365 @@
+import os
+import pandas as pd
+import torch
+from torch.utils.data import Dataset, DataLoader
+from pathlib import Path
+import numpy as np
+from PIL import Image
+import torch.nn as nn
+import torch.nn.functional as F
+import torch.optim as optim
+from torch.optim.lr_scheduler import StepLR
+
+# -----------------------------
+# 1️⃣ توکنایزر
+# -----------------------------
+class Tokenizer:
+    def __init__(self):
+        self.char_to_idx = {}
+        self.idx_to_char = {}
+        self.vocab_size = 0
+        self.build_vocab()
+    
+    def build_vocab(self):
+        """ساخت vocab برای زبان فارسی"""
+        # کاراکترهای پایه
+        persian_chars = [
+            'آ', 'ا', 'ب', 'پ', 'ت', 'ث', 'ج', 'چ', 'ح', 'خ', 'د', 'ذ', 'ر', 'ز', 'ژ', 'س', 'ش', 'ص', 'ض', 'ط', 'ظ',
+            'ع', 'غ', 'ف', 'ق', 'ک', 'گ', 'ل', 'م', 'ن', 'و', 'ه', 'ی', 'ء', 'ئ', 'أ', 'ؤ', 'ة'
+        ]
+        
+        # اعداد
+        numbers = [str(i) for i in range(10)]
+        
+        # علائم نگارشی
+        punctuation = [' ', '.', ',', '،', ';', ':', '!', '؟', '(', ')', '-', '_', '/', '\\', '\n']
+        
+        # کاراکترهای ویژه
+        special_chars = ['<PAD>', '<UNK>', '<SOS>', '<EOS>']
+        
+        all_chars = special_chars + persian_chars + numbers + punctuation
+        
+        for i, char in enumerate(all_chars):
+            self.char_to_idx[char] = i
+            self.idx_to_char[i] = char
+        
+        self.vocab_size = len(all_chars)
+        print(f"🔤 ساخت vocab | تعداد کاراکترها: {self.vocab_size}")
+    
+    def encode(self, text, max_length):
+        """تبدیل متن به دنباله اعداد"""
+        encoded = []
+        
+        # اضافه کردن توکن شروع
+        encoded.append(self.char_to_idx['<SOS>'])
+        
+        # تبدیل کاراکترها
+        for char in text:
+            if char in self.char_to_idx:
+                encoded.append(self.char_to_idx[char])
+            else:
+                encoded.append(self.char_to_idx['<UNK>'])
+        
+        # اضافه کردن توکن پایان
+        encoded.append(self.char_to_idx['<EOS>'])
+        
+        # padding
+        if len(encoded) < max_length:
+            encoded.extend([self.char_to_idx['<PAD>']] * (max_length - len(encoded)))
+        else:
+            encoded = encoded[:max_length]
+            encoded[-1] = self.char_to_idx['<EOS>']  # اطمینان از پایان
+        
+        return encoded
+    
+    def decode(self, indices):
+        """تبدیل دنباله اعداد به متن"""
+        text = ""
+        for idx in indices:
+            if idx == self.char_to_idx['<EOS>']:
+                break
+            if idx in self.idx_to_char and idx not in [self.char_to_idx['<PAD>'], self.char_to_idx['<SOS>']]:
+                text += self.idx_to_char[idx]
+        return text
+
+# -----------------------------
+# 2️⃣ Dataset با استفاده از PIL
+# -----------------------------
+class ArshasbDataset(Dataset):
+    def __init__(self, base_path, tokenizer, max_length=128, img_size=(256, 64)):
+        self.base_path = Path(base_path)
+        self.tokenizer = tokenizer
+        self.max_length = max_length
+        self.img_size = img_size
+        self.samples = []
+        
+        self.load_samples()
+    
+    def load_samples(self):
+        """بارگذاری نمونه‌ها از ساختار Arshasb"""
+        print("🔄 بارگذاری داده‌های Arshasb...")
+        
+        folders = [f for f in self.base_path.iterdir() if f.is_dir()]
+        print(f"📁 پیدا شد {len(folders)} پوشه")
+        
+        for folder in folders:
+            try:
+                # پیدا کردن فایل‌ها
+                png_files = list(folder.glob("page_*.png"))
+                txt_files = list(folder.glob("fulltext_*.txt"))
+                
+                if not png_files or not txt_files:
+                    continue
+                
+                # استفاده از اولین فایل تصویری و متنی
+                img_path = png_files[0]
+                txt_path = txt_files[0]
+                
+                # خواندن متن
+                with open(txt_path, 'r', encoding='utf-8') as f:
+                    text = f.read().strip()
+                
+                if text:  # اگر متن خالی نباشد
+                    self.samples.append({
+                        'image_path': str(img_path),
+                        'text': text
+                    })
+                    
+            except Exception as e:
+                print(f"⚠ خطا در پردازش {folder.name}: {e}")
+        
+        print(f"✅ {len(self.samples)} نمونه بارگذاری شد")
+    
+    def __len__(self):
+        return len(self.samples)
+    
+    def __getitem__(self, idx):
+        sample = self.samples[idx]
+        
+        # بارگذاری تصویر با PIL
+        image = Image.open(sample['image_path']).convert('RGB')
+        
+        # تغییر سایز و تبدیل به تانسور
+        image = image.resize(self.img_size)
+        image = np.array(image).astype(np.float32) / 255.0
+        image = torch.from_numpy(image).permute(2, 0, 1)  # HWC to CHW
+        
+        # توکنایز متن
+        text = sample['text']
+        encoding = self.tokenizer.encode(text, self.max_length)
+        
+        return {
+            'pixel_values': image,
+            'labels': torch.tensor(encoding, dtype=torch.long)
+        }
+
+def collate_fn(batch):
+    """تابع برای batch کردن داده‌ها"""
+    pixel_values = torch.stack([item['pixel_values'] for item in batch])
+    labels = torch.stack([item['labels'] for item in batch])
+    
+    return {
+        'pixel_values': pixel_values,
+        'labels': labels
+    }
+
+# -----------------------------
+# 3️⃣ مدل (همان مدل قبلی)
+# -----------------------------
+def GN(c, groups=16): 
+    return nn.GroupNorm(min(groups, c), c)
+
+class LightResNetCNN(nn.Module):
+    def __init__(self, in_channels=3, adaptive_height=8): 
+        super().__init__()
+        self.adaptive_height = adaptive_height
+        self.layer1 = nn.Sequential(nn.Conv2d(in_channels, 32, 3, 1, 1), GN(32), nn.ReLU(), nn.MaxPool2d(2, 2))
+        self.layer2 = nn.Sequential(nn.Conv2d(32, 64, 3, 1, 1), GN(64), nn.ReLU(), nn.MaxPool2d(2, 2))
+        self.layer3 = nn.Sequential(nn.Conv2d(64, 128, 3, 1, 1), GN(128), nn.ReLU(), nn.MaxPool2d(2, 2))
+        self.layer4 = nn.Sequential(nn.Conv2d(128, 256, 3, 1, 1), GN(256), nn.ReLU())
+        self.layer5 = nn.Sequential(nn.Conv2d(256, 256, 3, 1, 1), GN(256), nn.ReLU())
+        self.layer6 = nn.Sequential(nn.Conv2d(256, 128, 3, 1, 1), GN(128), nn.ReLU())
+        self.adaptive_pool = nn.AdaptiveAvgPool2d((self.adaptive_height, None))
+    
+    def forward(self, x):
+        for i in range(1, 7):
+            x = getattr(self, f"layer{i}")(x)
+        x = self.adaptive_pool(x)
+        return x
+
+class PositionalEncoding(nn.Module):
+    def __init__(self, d_model, max_len=2000):
+        super().__init__()
+        pe = torch.zeros(max_len, d_model)
+        position = torch.arange(0, max_len).unsqueeze(1)
+        div_term = torch.exp(torch.arange(0, d_model, 2) * (-torch.log(torch.tensor(10000.0)) / d_model))
+        pe[:, 0::2] = torch.sin(position * div_term)
+        pe[:, 1::2] = torch.cos(position * div_term)
+        self.register_buffer("pe", pe.unsqueeze(0))
+    
+    def forward(self, x):
+        return x + self.pe[:, :x.size(1), :]
+
+class CNN_Transformer_OCR(nn.Module):
+    def __init__(self, num_classes, d_model=128, nhead=8, num_layers=6, dropout=0.2):
+        super().__init__()
+        self.cnn = LightResNetCNN(in_channels=3, adaptive_height=8)
+        self.proj = nn.Linear(128 * 8, d_model)
+        self.posenc = PositionalEncoding(d_model)
+        encoder_layer = nn.TransformerEncoderLayer(d_model, nhead, batch_first=True, dropout=dropout)
+        self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
+        self.fc = nn.Linear(d_model, num_classes)
+        self.num_classes = num_classes 
+
+    def forward(self, pixel_values, labels=None):
+        # 1. Encoder 
+        f = self.cnn(pixel_values) 
+            
+        # 2. Reshape and Transformer
+        B, C, H, W = f.size()
+        f = f.permute(0, 3, 1, 2).reshape(B, W, C * H)
+        f = self.posenc(self.proj(f))
+        logits = self.transformer(f)
+        logits = self.fc(logits) # [B, W, num_classes]
+
+        # 3. خروجی نهایی
+        output = {"logits": logits}
+            
+        # 4. محاسبه Loss
+        if labels is not None:
+            loss = self.compute_loss(logits, labels)
+            output["loss"] = loss
+        return output 
+        
+    def compute_loss(self, logits, labels):
+        logits_seq_len = logits.size(1) 
+        target_labels = labels[:, :logits_seq_len]
+        
+        loss_logits = logits.reshape(-1, self.num_classes)
+        loss_labels = target_labels.reshape(-1)
+        
+        mask = loss_labels != -100
+        loss_logits = loss_logits[mask]
+        loss_labels = loss_labels[mask]
+
+        loss = F.cross_entropy(loss_logits, loss_labels)
+        return loss
+
+# -----------------------------
+# 4️⃣ آموزش مدل
+# -----------------------------
+def train_model():
+    """تابع اصلی برای آموزش مدل"""
+    
+    # مسیرها
+    data_path = "/home/fallahmoradi/Desktop/New folder (3)/Arshasb_7k"
+    model_save_path = "/home/fallahmoradi/Desktop/New folder (3)/models"
+    
+    # ایجاد پوشه مدل اگر وجود ندارد
+    Path(model_save_path).mkdir(exist_ok=True)
+    
+    # ایجاد توکنایزر
+    tokenizer = Tokenizer()
+    
+    # ایجاد dataset
+    dataset = ArshasbDataset(data_path, tokenizer, max_length=128)
+    
+    if len(dataset) == 0:
+        print("❌ هیچ داده‌ای پیدا نشد!")
+        return
+    
+    # تقسیم داده‌ها
+    train_size = int(0.8 * len(dataset))
+    val_size = int(0.1 * len(dataset))
+    test_size = len(dataset) - train_size - val_size
+    
+    train_dataset, val_dataset, test_dataset = torch.utils.data.random_split(
+        dataset, [train_size, val_size, test_size]
+    )
+    
+    print(f"📊 تقسیم داده: train={len(train_dataset)}, val={len(val_dataset)}, test={len(test_dataset)}")
+    
+    # DataLoader
+    batch_size = 4  # کاهش batch size برای جلوگیری از Out of Memory
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
+    val_loader = DataLoader(val_dataset, batch_size=batch_size, collate_fn=collate_fn)
+    
+    # مدل
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"🎯 استفاده از: {device}")
+    
+    model = CNN_Transformer_OCR(num_classes=tokenizer.vocab_size)
+    model = model.to(device)
+    
+    # نمایش خلاصه مدل
+    print(f"✅ مدل ساخته شد | پارامترها: {sum(p.numel() for p in model.parameters()):,}")
+    
+    # optimizer و scheduler
+    optimizer = optim.AdamW(model.parameters(), lr=0.001, weight_decay=0.01)
+    scheduler = StepLR(optimizer, step_size=10, gamma=0.1)
+    
+    # آموزش
+    num_epochs = 30
+    best_val_loss = float('inf')
+    
+    for epoch in range(num_epochs):
+        # فاز آموزش
+        model.train()
+        train_loss = 0
+        
+        for batch_idx, batch in enumerate(train_loader):
+            pixel_values = batch['pixel_values'].to(device)
+            labels = batch['labels'].to(device)
+            
+            optimizer.zero_grad()
+            
+            outputs = model(pixel_values=pixel_values, labels=labels)
+            loss = outputs['loss']
+            
+            loss.backward()
+            optimizer.step()
+            
+            train_loss += loss.item()
+            
+            if batch_idx % 50 == 0:
+                print(f"   📦 Batch {batch_idx}/{len(train_loader)} | Loss: {loss.item():.4f}")
+        
+        # فاز validation
+        model.eval()
+        val_loss = 0
+        
+        with torch.no_grad():
+            for batch in val_loader:
+                pixel_values = batch['pixel_values'].to(device)
+                labels = batch['labels'].to(device)
+                
+                outputs = model(pixel_values=pixel_values, labels=labels)
+                val_loss += outputs['loss'].item()
+        
+        train_loss /= len(train_loader)
+        val_loss /= len(val_loader)
+        
+        scheduler.step()
+        
+        print(f"📍 Epoch {epoch+1}/{num_epochs} | Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f} | LR: {scheduler.get_last_lr()[0]:.6f}")
+        
+        # ذخیره بهترین مدل
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
+            torch.save({
+                'epoch': epoch,
+                'model_state_dict': model.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict(),
+                'val_loss': val_loss,
+                'tokenizer': tokenizer
+            }, f"{model_save_path}/best_model.pth")
+            print(f"💾 مدل بهتر ذخیره شد (Val Loss: {val_loss:.4f})")
+    
+    print("✅ آموزش کامل شد!")
+
+# -----------------------------
+# 5️⃣ اجرای اصلی
+# -----------------------------
+if __name__ == "__main__":
+    print("🚀 شروع آموزش مدل OCR فارسی...")
+    train_model()
